@@ -1,0 +1,25 @@
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+.beads/*
+!.beads/*.jsonl
+
+# Agent tooling (local only)
+.agents/
+.codex/
+.claude/
+AGENTS.md
+CLAUDE.md
+
+# Node / build
+node_modules/
+dist/
+*.local
+.DS_Store
+
+# Consumer apps pin the ui-kit exactly, so this lockfile isn't tracked
+# (matches multiview/source-switch convention).
+package-lock.json
