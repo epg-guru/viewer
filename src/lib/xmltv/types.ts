@@ -7,6 +7,14 @@ export interface ChannelEntry {
   id: string;
   displayName: string;
   icon?: string;
+  /** <gnid> — a network/guide ID some feeds (e.g. epg.guru) include, distinct
+   * from the feed's own `id` attribute. */
+  gnid?: string;
+  /** Lowercased text content of every child element (all display-name
+   * variants, gnid, lcn, or anything else a feed includes), tags stripped —
+   * so search can match fields we don't otherwise surface, like a callsign
+   * or network ID. */
+  searchText: string;
   byteStart: number;
   byteEnd: number;
   malformed?: boolean;
@@ -18,6 +26,16 @@ export interface ProgrammeEntry {
   start: string;
   stop: string;
   title: string;
+  /** <sub-title> — e.g. an episode title. First element only. */
+  subTitle?: string;
+  /** <category> — free text, feed-defined. First element only. */
+  category?: string;
+  /** <desc> — synopsis text. First element only. */
+  desc?: string;
+  /** Lowercased text content of every child element, tags stripped — lets
+   * search match fields we don't otherwise surface (credits, episode-num,
+   * rating, etc). */
+  searchText: string;
   byteStart: number;
   byteEnd: number;
   malformed?: boolean;

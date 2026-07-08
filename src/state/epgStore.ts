@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { EpgIndex, ParserMessage, ParserRequest } from '../lib/xmltv/types';
 import { validateSourceUrl } from '../lib/urlValidation';
 import { readMemoryFragment, readOpfsFragment } from '../lib/opfs';
-import { loadSettings } from '../lib/settings';
+import { useSettingsStore } from './settingsStore';
 
 export const SIZE_WARNING_BYTES = 500 * 1024 * 1024;
 
@@ -32,6 +32,10 @@ interface EpgState {
   memoryBuffer: ArrayBuffer | null;
   pendingLargeLoad: PendingLargeLoad | null;
   worker: Worker | null;
+  /** Bumped by cancelLoad(); lets an in-flight requestLoad (paused on the
+   * HEAD await) detect it's been superseded/cancelled before it goes on to
+   * start a worker anyway. */
+  loadGeneration: number;
 
   requestLoad: (url: string) => Promise<void>;
   requestLoadFile: (file: File) => void;
@@ -88,6 +92,7 @@ export const useEpgStore = create<EpgState>((set, get) => ({
   memoryBuffer: null,
   pendingLargeLoad: null,
   worker: null,
+  loadGeneration: 0,
 
   requestLoad: async (rawUrl: string) => {
     const parsed = validateSourceUrl(rawUrl);
@@ -99,6 +104,7 @@ export const useEpgStore = create<EpgState>((set, get) => ({
     // Unload whatever's currently loaded before starting the next fetch, so
     // we never hold two sources' worth of index/buffer at once.
     get().cancelLoad();
+    const myGeneration = get().loadGeneration;
     set({ status: 'checking', error: null, index: null, memoryBuffer: null, progress: null });
 
     let totalBytes: number | null = null;
@@ -112,13 +118,17 @@ export const useEpgStore = create<EpgState>((set, get) => ({
       totalBytes = null;
     }
 
+    // The user may have cancelled (or started a different load) while the
+    // HEAD request was in flight — don't resurrect this one if so.
+    if (get().loadGeneration !== myGeneration) return;
+
     if (totalBytes && totalBytes > SIZE_WARNING_BYTES) {
       set({ status: 'idle', pendingLargeLoad: { kind: 'url', url: parsed.toString(), totalBytes } });
       return;
     }
 
     set({ status: 'loading' });
-    const corsProxyUrl = loadSettings().corsProxyUrl;
+    const corsProxyUrl = useSettingsStore.getState().corsProxyUrl;
     const worker = startWorker({ type: 'load', url: parsed.toString(), corsProxyUrl }, set);
     set({ worker });
   },
@@ -143,7 +153,7 @@ export const useEpgStore = create<EpgState>((set, get) => ({
     set({ pendingLargeLoad: null, status: 'loading' });
     const request: ParserRequest =
       pending.kind === 'url'
-        ? { type: 'load', url: pending.url, corsProxyUrl: loadSettings().corsProxyUrl }
+        ? { type: 'load', url: pending.url, corsProxyUrl: useSettingsStore.getState().corsProxyUrl }
         : { type: 'load-file', file: pending.file };
     const worker = startWorker(request, set);
     set({ worker });
@@ -153,13 +163,18 @@ export const useEpgStore = create<EpgState>((set, get) => ({
     set({ pendingLargeLoad: null, status: 'idle' });
   },
 
+  // Tears down any in-flight worker. Doubles as both the internal "unload
+  // before starting the next source" step and the user-facing "cancel this
+  // load" action (e.g. clicking the progress indicator) — safe to also
+  // reset status/progress here since every internal caller immediately
+  // sets its own status right after.
   cancelLoad: () => {
     const worker = get().worker;
     if (worker) {
       worker.postMessage({ type: 'cancel' });
       worker.terminate();
     }
-    set({ worker: null });
+    set((s) => ({ worker: null, status: 'idle', progress: null, loadGeneration: s.loadGeneration + 1 }));
   },
 
   readFragment: async (byteStart: number, byteEnd: number) => {

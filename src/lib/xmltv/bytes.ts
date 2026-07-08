@@ -56,3 +56,15 @@ export function extractFirstElementText(source: string, tag: string): string | u
   const m = re.exec(source);
   return m ? decodeXmlEntities(m[1].trim()) : undefined;
 }
+
+/** Strips all tags from an element's source, leaving the concatenated text
+ * content of every child (display-name variants, gnid, lcn, credits,
+ * whatever a feed includes) — a broad net for search, not a specific field
+ * extraction. Lowercased since it's only ever used for case-insensitive
+ * matching. */
+export function extractSearchText(source: string): string {
+  return decodeXmlEntities(source.replace(/<[^>]*>/g, ' '))
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}

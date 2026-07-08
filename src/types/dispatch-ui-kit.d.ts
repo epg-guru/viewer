@@ -39,7 +39,10 @@ declare module '@swvn-dispatch/dispatch-ui-kit' {
     actions?: HeaderAction[];
     onLogout?: () => void;
     githubUrl?: string;
-    kofiUrl?: string;
+    /** Defaults to ui-kit's own Ko-fi link if omitted (undefined). Pass
+     * `null` explicitly to suppress it — the default is a JS default
+     * parameter, which only applies for `undefined`, not `null`. */
+    kofiUrl?: string | null;
     username?: string;
   }
   export function AppHeader(props: AppHeaderProps): JSX.Element;

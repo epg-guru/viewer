@@ -1,4 +1,4 @@
-import { indexOfBytes, pattern, decodeUtf8, extractAttr, extractFirstElementText } from './bytes';
+import { indexOfBytes, pattern, decodeUtf8, extractAttr, extractFirstElementText, extractSearchText } from './bytes';
 import type { EpgHeader, ChannelEntry, ProgrammeEntry } from './types';
 
 // Fast, incremental, best-effort XMLTV scanner. It finds <channel>/<programme>
@@ -117,15 +117,21 @@ export class XmltvIndexer {
       const displayName = extractFirstElementText(src, 'display-name') ?? id;
       const iconTag = /<icon\b[^>]*>/.exec(src)?.[0] ?? '';
       const icon = extractAttr(iconTag, 'src');
+      const gnid = extractFirstElementText(src, 'gnid');
+      const searchText = extractSearchText(src);
       this.channelsSeen++;
-      this.cb.onChannel({ id, displayName, icon, byteStart, byteEnd });
+      this.cb.onChannel({ id, displayName, icon, gnid, searchText, byteStart, byteEnd });
     } else {
       const channel = extractAttr(openTag, 'channel') ?? '';
       const start = extractAttr(openTag, 'start') ?? '';
       const stop = extractAttr(openTag, 'stop') ?? '';
       const title = extractFirstElementText(src, 'title') ?? '';
+      const subTitle = extractFirstElementText(src, 'sub-title');
+      const category = extractFirstElementText(src, 'category');
+      const desc = extractFirstElementText(src, 'desc');
+      const searchText = extractSearchText(src);
       this.programmesSeen++;
-      this.cb.onProgramme({ channel, start, stop, title, byteStart, byteEnd });
+      this.cb.onProgramme({ channel, start, stop, title, subTitle, category, desc, searchText, byteStart, byteEnd });
     }
   }
 
@@ -143,15 +149,21 @@ export class XmltvIndexer {
     if (which === 'channel') {
       const id = extractAttr(openTag, 'id') ?? '(unknown channel)';
       const displayName = extractFirstElementText(src, 'display-name') ?? id;
+      const gnid = extractFirstElementText(src, 'gnid');
+      const searchText = extractSearchText(src);
       this.channelsSeen++;
-      this.cb.onChannel({ id, displayName, byteStart, byteEnd, malformed: true });
+      this.cb.onChannel({ id, displayName, gnid, searchText, byteStart, byteEnd, malformed: true });
     } else {
       const channel = extractAttr(openTag, 'channel') ?? '(unknown)';
       const start = extractAttr(openTag, 'start') ?? '';
       const stop = extractAttr(openTag, 'stop') ?? '';
       const title = extractFirstElementText(src, 'title') ?? '(unterminated programme)';
+      const subTitle = extractFirstElementText(src, 'sub-title');
+      const category = extractFirstElementText(src, 'category');
+      const desc = extractFirstElementText(src, 'desc');
+      const searchText = extractSearchText(src);
       this.programmesSeen++;
-      this.cb.onProgramme({ channel, start, stop, title, byteStart, byteEnd, malformed: true });
+      this.cb.onProgramme({ channel, start, stop, title, subTitle, category, desc, searchText, byteStart, byteEnd, malformed: true });
     }
   }
 }

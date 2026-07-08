@@ -52,10 +52,7 @@ export function Footer() {
           : __COMMIT_HASH__;
 
   return (
-    <Group h="100%" px="md" justify="space-between" wrap="nowrap">
-      <Text size="xs" c="dimmed">
-        EPG Viewer
-      </Text>
+    <Group h="100%" px="md" justify="flex-end" wrap="nowrap">
       <UnstyledButton onClick={checkForUpdates}>
         <Group gap={4} wrap="nowrap">
           {status === 'checking' && <Loader size={10} />}
