@@ -40,7 +40,7 @@ declare module '@swvn-dispatch/dispatch-ui-kit' {
     onLogout?: () => void;
     githubUrl?: string;
     /** Defaults to ui-kit's own Ko-fi link if omitted (undefined). Pass
-     * `null` explicitly to suppress it — the default is a JS default
+     * `null` explicitly to suppress it, the default is a JS default
      * parameter, which only applies for `undefined`, not `null`. */
     kofiUrl?: string | null;
     username?: string;

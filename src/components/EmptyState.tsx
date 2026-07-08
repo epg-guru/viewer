@@ -39,7 +39,7 @@ export function EmptyState() {
           style={{ display: 'none' }}
         />
         <Text c="dimmed" size="sm">
-          .xml or .xml.gz — or switch to Direct URL lookup in Settings
+          .xml or .xml.gz, or switch to Direct URL lookup in Settings
         </Text>
       </Stack>
     </Center>

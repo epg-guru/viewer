@@ -15,10 +15,9 @@ export function ChannelCell({ channel, searchQuery = '', onInspect }: ChannelCel
   const [imgError, setImgError] = useState(false);
   const safeIcon = validateImageUrl(channel.icon);
 
-  // Show id + gnid only when both are actually informative — skip gnid if
-  // it's missing or identical to id (nothing extra to say).
-  const idLine =
-    channel.gnid && channel.gnid !== channel.id ? `${channel.id} · ${channel.gnid}` : channel.id || undefined;
+  // Show gnid only when it's actually informative: skip it if missing or
+  // identical to id (nothing extra to say).
+  const showGnid = Boolean(channel.gnid && channel.gnid !== channel.id);
 
   return (
     <UnstyledButton
@@ -33,14 +32,19 @@ export function ChannelCell({ channel, searchQuery = '', onInspect }: ChannelCel
         )}
         <Stack gap={0} style={{ flex: 1, overflow: 'hidden' }}>
           <HighlightText text={channel.displayName || channel.id} query={searchQuery} size="sm" truncate />
-          {idLine && (
+          {channel.id && (
             <Text size="10px" c="dimmed" truncate ff="monospace">
-              {idLine}
+              {channel.id}
+            </Text>
+          )}
+          {showGnid && (
+            <Text size="10px" c="dimmed" truncate ff="monospace">
+              {channel.gnid}
             </Text>
           )}
         </Stack>
         {channel.malformed && (
-          <Tooltip label="Boundary detection was ambiguous for this entry — showing best effort">
+          <Tooltip label="Boundary detection was ambiguous for this entry, showing best effort">
             <IconAlertTriangle size={14} color="var(--mantine-color-yellow-6)" style={{ flexShrink: 0 }} />
           </Tooltip>
         )}

@@ -18,7 +18,7 @@ export function SourceBar() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [urlInput, setUrlInput] = useState('');
 
-  // Auto-load ?url= on first mount only — a shared/bookmarked link should
+  // Auto-load ?url= on first mount only, a shared/bookmarked link should
   // just work without the user re-pasting it, switching to URL mode so the
   // right control is actually visible.
   useEffect(() => {
@@ -29,7 +29,7 @@ export function SourceBar() {
       setSourceMode('url');
       void requestLoad(fromParam);
     }
-    // Intentionally empty deps — this is a one-time initial-load effect.
+    // Intentionally empty deps, this is a one-time initial-load effect.
     // eslint-disable-next-line
   }, []);
 
@@ -75,7 +75,7 @@ export function SourceBar() {
     );
   }
 
-  // Nothing loaded yet — EmptyState already has a big Upload CTA in the main
+  // Nothing loaded yet, EmptyState already has a big Upload CTA in the main
   // content area, so a second small button up here would just look lonely
   // and redundant. Only show this row once there's something to swap out.
   if (status !== 'ready') return null;

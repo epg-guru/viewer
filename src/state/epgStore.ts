@@ -29,6 +29,11 @@ interface EpgState {
   index: EpgIndex | null;
   progress: EpgProgress | null;
   error: EpgError | null;
+  /** Set once decompressed size crosses the coordinator's soft memory
+   * threshold, advisory only, parsing continues; the HEAD-based size
+   * check only ever sees compressed size, and gzip ratios vary widely
+   * enough that this can trip even when the pre-flight warning didn't. */
+  memoryWarningBytes: number | null;
   memoryBuffer: ArrayBuffer | null;
   pendingLargeLoad: PendingLargeLoad | null;
   worker: Worker | null;
@@ -62,6 +67,9 @@ function attachWorker(worker: Worker, set: (partial: Partial<EpgState>) => void)
       case 'buffer':
         set({ memoryBuffer: msg.buffer });
         break;
+      case 'memory-warning':
+        set({ memoryWarningBytes: msg.decompressedBytes });
+        break;
       case 'done':
         set({ status: 'ready', index: msg.index, sourceUrl: msg.index.sourceUrl, sourceKind: msg.index.sourceKind });
         break;
@@ -89,6 +97,7 @@ export const useEpgStore = create<EpgState>((set, get) => ({
   index: null,
   progress: null,
   error: null,
+  memoryWarningBytes: null,
   memoryBuffer: null,
   pendingLargeLoad: null,
   worker: null,
@@ -105,7 +114,7 @@ export const useEpgStore = create<EpgState>((set, get) => ({
     // we never hold two sources' worth of index/buffer at once.
     get().cancelLoad();
     const myGeneration = get().loadGeneration;
-    set({ status: 'checking', error: null, index: null, memoryBuffer: null, progress: null });
+    set({ status: 'checking', error: null, index: null, memoryBuffer: null, progress: null, memoryWarningBytes: null });
 
     let totalBytes: number | null = null;
     try {
@@ -113,13 +122,13 @@ export const useEpgStore = create<EpgState>((set, get) => ({
       const len = head.headers.get('content-length');
       totalBytes = len ? Number(len) : null;
     } catch {
-      // HEAD can fail (CORS, method not allowed, etc.) — that's fine, we
+      // HEAD can fail (CORS, method not allowed, etc.), that's fine, we
       // fall back to the worker's mid-download progress-based warning.
       totalBytes = null;
     }
 
     // The user may have cancelled (or started a different load) while the
-    // HEAD request was in flight — don't resurrect this one if so.
+    // HEAD request was in flight, don't resurrect this one if so.
     if (get().loadGeneration !== myGeneration) return;
 
     if (totalBytes && totalBytes > SIZE_WARNING_BYTES) {
@@ -135,7 +144,7 @@ export const useEpgStore = create<EpgState>((set, get) => ({
 
   requestLoadFile: (file: File) => {
     get().cancelLoad();
-    set({ status: 'idle', error: null, index: null, memoryBuffer: null, progress: null });
+    set({ status: 'idle', error: null, index: null, memoryBuffer: null, progress: null, memoryWarningBytes: null });
 
     if (file.size > SIZE_WARNING_BYTES) {
       set({ pendingLargeLoad: { kind: 'file', file, totalBytes: file.size } });
@@ -165,7 +174,7 @@ export const useEpgStore = create<EpgState>((set, get) => ({
 
   // Tears down any in-flight worker. Doubles as both the internal "unload
   // before starting the next source" step and the user-facing "cancel this
-  // load" action (e.g. clicking the progress indicator) — safe to also
+  // load" action (e.g. clicking the progress indicator), safe to also
   // reset status/progress here since every internal caller immediately
   // sets its own status right after.
   cancelLoad: () => {

@@ -1,6 +1,6 @@
 /**
  * Validates a user- or feed-supplied EPG source URL. Only http/https are
- * accepted — this is the primary XSS/SSRF-ish guard for the whole app, since
+ * accepted, this is the primary XSS/SSRF-ish guard for the whole app, since
  * this URL comes straight from the address bar (`?url=`) or a pasted string,
  * both untrusted. Returns the parsed URL on success, or null.
  */
@@ -17,7 +17,7 @@ export function validateSourceUrl(input: string): URL | null {
 
 /**
  * Validates a channel icon URL pulled out of the parsed XML (also untrusted
- * — it comes from whatever feed the user pointed us at). Slightly more
+ *, it comes from whatever feed the user pointed us at). Slightly more
  * permissive than validateSourceUrl since `data:` icons are legitimate and
  * already allowed by the CSP's `img-src`.
  */

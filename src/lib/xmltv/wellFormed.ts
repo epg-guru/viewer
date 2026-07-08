@@ -16,7 +16,7 @@ const LINE_COL_RE = /line\s+(\d+)(?:[^\d]+column\s+(\d+))?/i;
  * <programme>...</programme> element) for well-formedness. Fragments are
  * parsed standalone, so undeclared entities from the original document
  * (rare in XMLTV, but possible) will read as errors here even though the
- * full document might define them — that's an acceptable tradeoff for
+ * full document might define them, that's an acceptable tradeoff for
  * being able to validate a fragment in isolation without the whole file.
  */
 export function checkWellFormed(fragment: string): WellFormedResult {

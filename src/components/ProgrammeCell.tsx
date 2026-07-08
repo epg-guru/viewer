@@ -8,7 +8,7 @@ export interface ProgrammeCellProps {
   programme: ProgrammeEntry;
   left: number;
   width: number;
-  /** Category color — a solid left-border accent, plus a low-opacity tint
+  /** Category color, a solid left-border accent, plus a low-opacity tint
    * across the cell. Text stays in normal ink regardless of hue. */
   color: string;
   searchQuery?: string;
@@ -30,7 +30,7 @@ export function ProgrammeCell({ programme, left, width, color, searchQuery = '',
         overflow: 'hidden',
         background: programme.malformed ? 'var(--mantine-color-yellow-9)' : hexToRgba(color, 0.18),
         // Longhand border properties throughout (never mixed with the `border`
-        // shorthand) — mixing the two on the same element trips a React DOM
+        // shorthand), mixing the two on the same element trips a React DOM
         // warning when only one side changes across rerenders.
         borderTopWidth: 1,
         borderRightWidth: 1,
@@ -49,7 +49,7 @@ export function ProgrammeCell({ programme, left, width, color, searchQuery = '',
         justifyContent: 'center',
         gap: 1,
       }}
-      title={programme.subTitle ? `${programme.title} — ${programme.subTitle}` : programme.title}
+      title={programme.subTitle ? `${programme.title}: ${programme.subTitle}` : programme.title}
     >
       <Group gap={4} wrap="nowrap">
         {programme.malformed && <IconAlertTriangle size={12} color="var(--mantine-color-yellow-3)" />}

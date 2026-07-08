@@ -1,6 +1,6 @@
 /** Reads a byte range out of the OPFS file the worker wrote decompressed
  * EPG bytes into, decoding it to a UTF-8 string. Used for on-demand,
- * per-fragment retrieval when a user clicks a channel/programme cell —
+ * per-fragment retrieval when a user clicks a channel/programme cell,
  * cheap because Blob.slice() doesn't copy the whole file, only the range
  * actually read. */
 export async function readOpfsFragment(fileName: string, byteStart: number, byteEnd: number): Promise<string> {

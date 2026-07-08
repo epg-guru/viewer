@@ -5,7 +5,7 @@
 
 const encoder = new TextEncoder();
 
-/** Naive byte-pattern search — fine here since patterns are short (tag names)
+/** Naive byte-pattern search, fine here since patterns are short (tag names)
  * and buffers are small (a handful of pending elements at most). */
 export function indexOfBytes(haystack: Uint8Array, needle: Uint8Array, from = 0): number {
   const end = haystack.length - needle.length;
@@ -33,7 +33,7 @@ const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', a
 
 /** Minimal XML entity decoder for the small attribute/text fragments we
  * extract during indexing (display-name, title, icon href). Not a full XML
- * parser — just enough for what shows up in real-world XMLTV feeds. */
+ * parser, just enough for what shows up in real-world XMLTV feeds. */
 export function decodeXmlEntities(s: string): string {
   return s.replace(ENTITY_RE, (m, body: string) => {
     if (body[0] === '#') {
@@ -59,7 +59,7 @@ export function extractFirstElementText(source: string, tag: string): string | u
 
 /** Strips all tags from an element's source, leaving the concatenated text
  * content of every child (display-name variants, gnid, lcn, credits,
- * whatever a feed includes) — a broad net for search, not a specific field
+ * whatever a feed includes), a broad net for search, not a specific field
  * extraction. Lowercased since it's only ever used for case-insensitive
  * matching. */
 export function extractSearchText(source: string): string {

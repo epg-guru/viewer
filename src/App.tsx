@@ -7,6 +7,7 @@ import { useEpgStore } from './state/epgStore';
 import { SourceBar } from './components/SourceBar';
 import { EmptyState } from './components/EmptyState';
 import { SizeWarningModal } from './components/SizeWarningModal';
+import { MemoryWarningModal } from './components/MemoryWarningModal';
 import { EpgHeaderInfo } from './components/EpgHeaderInfo';
 import { GuideGrid, type InspectTarget } from './components/GuideGrid';
 import { Footer } from './components/Footer';
@@ -62,7 +63,6 @@ export function App() {
         <Stack gap="sm" pt="xs" pb="sm" style={{ flexShrink: 0 }}>
           <SourceBar />
           <StatusArea />
-          {index && <EpgHeaderInfo index={index} />}
         </Stack>
 
         <div
@@ -119,6 +119,24 @@ export function App() {
               <EmptyState />
             )}
           </div>
+          {status === 'ready' && index && (
+            <Group
+              justify="flex-end"
+              align="center"
+              wrap="nowrap"
+              gap="sm"
+              px="sm"
+              py={4}
+              style={{
+                flexShrink: 0,
+                background: 'var(--mantine-color-dark-6)',
+                borderTop: '1px solid var(--mantine-color-dark-4)',
+                overflow: 'hidden',
+              }}
+            >
+              <EpgHeaderInfo index={index} />
+            </Group>
+          )}
         </div>
       </AppShell.Main>
 
@@ -127,6 +145,7 @@ export function App() {
       </AppShell.Footer>
 
       <SizeWarningModal />
+      <MemoryWarningModal />
       <SettingsMenu opened={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {inspectTarget && (
         <Suspense fallback={null}>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Text } from '@mantine/core';
 import type { ChannelEntry, EpgIndex, ProgrammeEntry } from '../lib/xmltv/types';
-import { parseXmltvTime } from '../lib/xmltv/time';
+import { getChannel, getChannelProgrammeIndices, getProgramme, sliceString } from '../lib/xmltv/columnar';
 import { buildCategoryColorMap } from '../lib/categoryColors';
 import { useSettingsStore } from '../state/settingsStore';
 import { ChannelCell } from './ChannelCell';
@@ -33,10 +33,13 @@ export interface GuideGridProps {
   jumpToNowSignal?: number;
 }
 
-// searchText already covers title/subTitle/category/desc/etc — every text
-// node in the programme, tags stripped, lowercased at parse time.
-function programmeMatches(p: ProgrammeEntry, query: string): boolean {
-  return p.searchText.includes(query);
+// searchText already covers title/subTitle/category/desc/etc, every text
+// node in the programme, tags stripped, lowercased at parse time. Matched
+// directly against the columnar field so we never have to materialize a
+// full ProgrammeEntry object just to test a query (which would reintroduce
+// millions of short-lived allocations during search on a huge feed).
+function programmeMatchesAt(index: EpgIndex, i: number, query: string): boolean {
+  return sliceString(index.programmes.searchText, i).includes(query);
 }
 
 function floorToHour(ms: number): number {
@@ -46,7 +49,7 @@ function floorToHour(ms: number): number {
 }
 
 // Calendar-day boundaries are meaningful in the viewer's local time, not
-// UTC — unlike floorToHour above, which only needs DST-safe hour alignment.
+// UTC, unlike floorToHour above, which only needs DST-safe hour alignment.
 function floorToLocalMidnight(ms: number): number {
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
@@ -71,38 +74,41 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
 
   const categoryColors = useMemo(() => buildCategoryColorMap(index), [index]);
 
-  // Which channels match (name or any programme) — computed once per query
-  // over the whole dataset. Search actually filters the grid: non-matching
-  // channels are dropped from the row list entirely, and within a matching
-  // channel only its matching programmes render.
-  const { matchingChannelIds, matchCount } = useMemo(() => {
-    if (!query) return { matchingChannelIds: null as Set<string> | null, matchCount: 0 };
-    const ids = new Set<string>();
+  // Which channels match (name or any programme), computed once per query
+  // over the whole dataset, working directly against the columnar arrays
+  // (no per-entry object allocation). Search actually filters the grid:
+  // non-matching channels are dropped from the row list entirely; within a
+  // matching channel, all of its programmes still render (see
+  // visibleProgrammes below).
+  const { matchingChannelIndices, matchCount } = useMemo(() => {
+    if (!query) return { matchingChannelIndices: null as Set<number> | null, matchCount: 0 };
+    const indices = new Set<number>();
     let count = 0;
-    for (const channel of index.channels) {
-      const channelNameMatch = searchScope !== 'programmes' && channel.searchText.includes(query);
+    for (let ci = 0; ci < index.channels.count; ci++) {
+      const channelNameMatch = searchScope !== 'programmes' && sliceString(index.channels.searchText, ci).includes(query);
       let channelHasMatch = channelNameMatch;
       if (searchScope !== 'channels') {
-        const programmes = index.programmesByChannel.get(channel.id) ?? [];
-        for (const p of programmes) {
-          if (programmeMatches(p, query)) {
+        for (const gi of getChannelProgrammeIndices(index, ci)) {
+          if (programmeMatchesAt(index, gi, query)) {
             channelHasMatch = true;
             count++;
           }
         }
       }
-      if (channelHasMatch) ids.add(channel.id);
+      if (channelHasMatch) indices.add(ci);
     }
-    return { matchingChannelIds: ids, matchCount: count };
+    return { matchingChannelIndices: indices, matchCount: count };
   }, [index, query, searchScope]);
 
-  const visibleChannels = useMemo(
-    () => (matchingChannelIds ? index.channels.filter((c) => matchingChannelIds.has(c.id)) : index.channels),
-    [index, matchingChannelIds],
-  );
+  const visibleChannelIndices = useMemo(() => {
+    if (!matchingChannelIndices) {
+      return Array.from({ length: index.channels.count }, (_, i) => i);
+    }
+    return Array.from(matchingChannelIndices).sort((a, b) => a - b);
+  }, [index, matchingChannelIndices]);
 
   const rowVirtualizer = useVirtualizer({
-    count: visibleChannels.length,
+    count: visibleChannelIndices.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 6,
@@ -122,7 +128,7 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
     return () => observer.disconnect();
   }, []);
 
-  // Live "now" indicator — re-render on a light interval rather than
+  // Live "now" indicator, re-render on a light interval rather than
   // reacting to every scroll/resize, since minute-level precision is plenty.
   useEffect(() => {
     const id = setInterval(() => setNowTick(Date.now()), NOW_TICK_MS);
@@ -156,7 +162,7 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
   }, [viewStartMs, viewEndMs, timelineStart]);
 
   // Each entry spans a FULL calendar day (not clipped to the visible
-  // window) — the label inside sticks to the left edge of the viewport
+  // window), the label inside sticks to the left edge of the viewport
   // while its day segment is in view, then hands off to the next one, via
   // nested position:sticky within each day's own absolutely-positioned box.
   const dateSegments = useMemo(() => {
@@ -184,22 +190,16 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
   }, [nowTick, timelineStart, timelineEnd]);
 
   const visibleProgrammes = useCallback(
-    (channelId: string): { entry: ProgrammeEntry; left: number; width: number }[] => {
-      const list = index.programmesByChannel.get(channelId);
-      if (!list) return [];
-      // Search only decides which CHANNEL rows appear (via matchingChannelIds
-      // below); once a channel is shown, all of its programmes render —
-      // otherwise a channel that matched by name alone (its own programme
-      // titles containing none of the query text) would show as empty.
+    (channelIdx: number): { entry: ProgrammeEntry; left: number; width: number }[] => {
       const out: { entry: ProgrammeEntry; left: number; width: number }[] = [];
-      for (const entry of list) {
-        const start = parseXmltvTime(entry.start);
-        const stop = parseXmltvTime(entry.stop);
-        if (start === null || stop === null) continue;
+      for (const gi of getChannelProgrammeIndices(index, channelIdx)) {
+        const start = index.programmes.start[gi];
+        const stop = index.programmes.stop[gi];
+        if (!Number.isFinite(start) || !Number.isFinite(stop)) continue;
         if (stop < viewStartMs || start > viewEndMs) continue;
         const left = ((start - timelineStart) / 60_000) * PX_PER_MINUTE;
         const width = ((stop - start) / 60_000) * PX_PER_MINUTE;
-        out.push({ entry, left, width });
+        out.push({ entry: getProgramme(index.programmes, index.channels, gi), left, width });
       }
       return out;
     },
@@ -254,7 +254,7 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
               >
                 {query && (
                   <Text size="10px" c="dimmed">
-                    {matchingChannelIds!.size.toLocaleString()} matching channel{matchingChannelIds!.size === 1 ? '' : 's'}
+                    {matchingChannelIndices!.size.toLocaleString()} matching channel{matchingChannelIndices!.size === 1 ? '' : 's'}
                   </Text>
                 )}
               </div>
@@ -278,7 +278,7 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
                 }}
               >
                 {dateSegments.map((seg) => (
-                  // No overflow:hidden here — per the CSS Overflow spec, an
+                  // No overflow:hidden here, per the CSS Overflow spec, an
                   // overflow:hidden ancestor becomes the sticky element's own
                   // scroll-reference container, which would make it "stick"
                   // relative to this (already-scrolling-with-the-page) div
@@ -291,7 +291,7 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
                       style={{
                         position: 'sticky',
                         // position:sticky's `left` is relative to the true
-                        // scroll viewport edge, not this element's parent —
+                        // scroll viewport edge, not this element's parent.
                         // left:0 would sit behind (and get covered by) the
                         // sticky channel column, which also claims x:0.
                         // Offsetting by CHANNEL_COL_WIDTH sticks it flush
@@ -372,7 +372,8 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
           )}
 
           {rowVirtualizer.getVirtualItems().map((vRow) => {
-            const channel = visibleChannels[vRow.index];
+            const channelIdx = visibleChannelIndices[vRow.index];
+            const channel = getChannel(index.channels, channelIdx);
             return (
               <div
                 key={channel.id + vRow.index}
@@ -403,7 +404,7 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
                   />
                 </div>
                 <div style={{ position: 'relative', width: totalWidth }}>
-                  {visibleProgrammes(channel.id).map(({ entry, left, width }) => (
+                  {visibleProgrammes(channelIdx).map(({ entry, left, width }) => (
                     <ProgrammeCell
                       key={entry.byteStart}
                       programme={entry}

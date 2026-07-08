@@ -1,13 +1,30 @@
 /// <reference lib="webworker" />
-import { XmltvIndexer } from '../lib/xmltv/tokenizer';
-import { parseXmltvTime } from '../lib/xmltv/time';
+import { XmltvBoundaryScanner } from '../lib/xmltv/tokenizer';
+import { extractHeaderFields } from '../lib/xmltv/fieldExtraction';
+import { mergeSegments, collectIndexTransferables } from '../lib/xmltv/columnar';
 import { guessCompressionFromName, type Compression } from '../lib/urlValidation';
-import type { ChannelEntry, EpgHeader, EpgIndex, ParserMessage, ParserRequest, ProgrammeEntry } from '../lib/xmltv/types';
+import type { EpgHeader, EpgIndex, ParserMessage, ParserRequest, SegmentParseRequest, SegmentParseResult } from '../lib/xmltv/types';
 
 declare const self: DedicatedWorkerGlobalScope;
 
 const OPFS_FILE_NAME = 'current-source.bin';
 const PROGRESS_INTERVAL_MS = 200;
+// Segments this size (post-decompression) get dispatched to the parser
+// pool, big enough to amortize per-message overhead, small enough that a
+// handful of workers can all stay busy rather than waiting on one giant
+// chunk at the end.
+const SEGMENT_TARGET_BYTES = 16 * 1024 * 1024;
+// Advisory-only heads-up once decompressed size crosses this, the
+// pre-flight HEAD check only sees compressed size, and gzip ratios vary
+// widely enough that a modest download can still expand to multiple GB.
+const MEMORY_WARNING_BYTES = 1.5 * 1024 * 1024 * 1024;
+
+// This worker is the coordinator: it owns the one genuinely sequential part
+// of the pipeline (fetch, gzip decompression, the single-writer OPFS
+// handle, and cheap byte-boundary scanning), and fans out the expensive
+// part, actually extracting fields from each element, to a small pool of
+// parser workers (xmltvSegmentParser.worker.ts) running in parallel. See
+// src/lib/xmltv/columnar.ts for the shared data model both sides speak.
 
 // Minimal structural type for the OPFS sync-access-handle API, since it's
 // new enough that not every TS lib version ships full ambient types for it.
@@ -21,12 +38,14 @@ type SyncAccessHandle = {
 
 let currentAbort: AbortController | null = null;
 let cancelled = false;
+let activePool: WorkerPool | null = null;
 
 self.addEventListener('message', (event: MessageEvent<ParserRequest | { type: 'cancel' }>) => {
   const msg = event.data;
   if (msg.type === 'cancel') {
     cancelled = true;
     currentAbort?.abort();
+    activePool?.terminate();
     return;
   }
   cancelled = false;
@@ -65,7 +84,7 @@ function buildProxyUrl(proxyBase: string, target: string): string {
 
 /** Direct fetch first; if that throws (typically a CORS rejection) and a
  * proxy is configured, retry through it once. The proxy just needs to
- * forward bytes and re-add CORS headers for our origin — see proxy/. */
+ * forward bytes and re-add CORS headers for our origin, see proxy/. */
 async function fetchDirectOrViaProxy(
   url: string,
   corsProxyUrl: string | null,
@@ -111,8 +130,8 @@ async function runFromUrl(rawUrl: string, corsProxyUrl: string | null): Promise<
       type: 'error',
       kind: 'cors',
       message: corsProxyUrl
-        ? "Fetch failed even through the configured CORS proxy — the source may be down, or the proxy couldn't reach it."
-        : 'Fetch failed — this usually means the source doesn\'t send permissive CORS headers ' +
+        ? "Fetch failed even through the configured CORS proxy. The source may be down, or the proxy couldn't reach it."
+        : 'Fetch failed. This usually means the source doesn\'t send permissive CORS headers ' +
           '(Access-Control-Allow-Origin) for cross-origin browser requests. Try a CORS-friendly mirror, ' +
           'configure a CORS proxy in Settings, or upload the file directly.',
     });
@@ -168,33 +187,139 @@ interface StreamJob {
   signal: AbortSignal;
 }
 
+/** Round-robin pool of parser workers. Segment results are collected
+ * unordered (any worker can finish any segment first) and sorted by
+ * sequence number only once, at the very end, there's no need to
+ * reassemble in real time since the final columnar index isn't built until
+ * every segment is in anyway. */
+class WorkerPool {
+  private workers: Worker[] = [];
+  private next = 0;
+  private results: SegmentParseResult[] = [];
+  private dispatched = 0;
+  private settled = 0;
+  private onAllSettled: (() => void) | null = null;
+  private failed = false;
+
+  constructor(size: number, private onError: (err: string) => void) {
+    for (let i = 0; i < size; i++) {
+      const worker = new Worker(new URL('./xmltvSegmentParser.worker.ts', import.meta.url), { type: 'module' });
+      worker.onmessage = (event: MessageEvent<SegmentParseResult>) => {
+        this.results.push(event.data);
+        this.settled++;
+        this.checkDone();
+      };
+      worker.onerror = (event) => {
+        this.failed = true;
+        this.settled++;
+        this.onError(event.message || 'Parser worker crashed.');
+        this.checkDone();
+      };
+      this.workers.push(worker);
+    }
+  }
+
+  dispatch(bytes: Uint8Array, baseOffset: number, sequence: number): void {
+    if (this.failed) return;
+    const worker = this.workers[this.next];
+    this.next = (this.next + 1) % this.workers.length;
+    this.dispatched++;
+    // .slice() copies out of the coordinator's rolling segment buffer so
+    // the transferred ArrayBuffer is exactly this segment's own memory.
+    const owned = bytes.slice();
+    const request: SegmentParseRequest = { type: 'parse-segment', bytes: owned.buffer, baseOffset, sequence };
+    worker.postMessage(request, [owned.buffer]);
+  }
+
+  private checkDone(): void {
+    if (this.settled >= this.dispatched) this.onAllSettled?.();
+  }
+
+  /** Resolves once every dispatched segment has a result (or the pool failed). */
+  async waitForAll(): Promise<SegmentParseResult[]> {
+    if (this.settled < this.dispatched) {
+      await new Promise<void>((resolve) => {
+        this.onAllSettled = resolve;
+      });
+    }
+    this.results.sort((a, b) => a.sequence - b.sequence);
+    return this.results;
+  }
+
+  terminate(): void {
+    for (const w of this.workers) w.terminate();
+  }
+}
+
 async function runFromStream(job: StreamJob): Promise<void> {
   const { compression, totalBytes, sourceUrl, sourceKind } = job;
 
   let bytesRead = 0;
   let lastProgressPost = 0;
-  const channelsByOrder: ChannelEntry[] = [];
-  const programmesByChannel = new Map<string, ProgrammeEntry[]>();
   let header: EpgHeader = {};
-  let timeRangeStart: number | null = null;
-  let timeRangeEnd: number | null = null;
+  let memoryWarned = false;
 
-  const indexer = new XmltvIndexer({
-    onHeader: (h) => {
-      header = h;
-    },
-    onChannel: (entry) => {
-      channelsByOrder.push(entry);
-    },
-    onProgramme: (entry) => {
-      const list = programmesByChannel.get(entry.channel);
-      if (list) list.push(entry);
-      else programmesByChannel.set(entry.channel, [entry]);
+  const poolSize = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 4));
+  let poolError: string | null = null;
+  const pool = new WorkerPool(poolSize, (msg) => {
+    poolError = msg;
+  });
+  activePool = pool;
 
-      const start = parseXmltvTime(entry.start);
-      const stop = parseXmltvTime(entry.stop);
-      if (start !== null) timeRangeStart = timeRangeStart === null ? start : Math.min(timeRangeStart, start);
-      if (stop !== null) timeRangeEnd = timeRangeEnd === null ? stop : Math.max(timeRangeEnd, stop);
+  // Mirrors the raw decompressed stream (same bytes fed to the scanner and
+  // written to OPFS), so a segment can be cut as one CONTIGUOUS slice
+  // spanning its first element's start to its last element's end. This
+  // matters because inter-element whitespace in real XMLTV files isn't
+  // captured by any single element's own bytes; concatenating only the
+  // per-element byte spans (an earlier version of this code) silently
+  // dropped that whitespace, which desynced the segment-parser worker's
+  // local-offset-plus-baseOffset math from the true absolute stream
+  // position by a few bytes per element, compounding across a segment.
+  // The result: byteStart/byteEnd recorded for elements later in a segment
+  // pointed a little too early, so the click-to-inspect XML fragment
+  // fetched from OPFS came out truncated mid-tag.
+  // Pre-allocated, grown by doubling (like memBuf below) and compacted via
+  // in-place copyWithin at each segment flush, not by repeated concat, so
+  // appending stays O(total bytes) rather than O(segment size squared).
+  let rawBuf: Uint8Array = new Uint8Array(1024 * 1024);
+  let rawBufLen = 0;
+  let rawBufBase = 0;
+  let segmentBytes = 0;
+  let segmentBase = 0;
+  let segmentEnd = 0;
+  let sequence = 0;
+
+  function ensureRawCapacity(extra: number): void {
+    const needed = rawBufLen + extra;
+    if (needed <= rawBuf.length) return;
+    let newLen = rawBuf.length * 2;
+    while (newLen < needed) newLen *= 2;
+    const grown = new Uint8Array(newLen);
+    grown.set(rawBuf.subarray(0, rawBufLen));
+    rawBuf = grown;
+  }
+
+  function flushSegment(): void {
+    if (segmentBytes === 0) return;
+    const localStart = segmentBase - rawBufBase;
+    const localEnd = segmentEnd - rawBufBase;
+    const slice = rawBuf.subarray(localStart, localEnd);
+    pool.dispatch(slice, segmentBase, sequence++);
+    rawBuf.copyWithin(0, localEnd, rawBufLen);
+    rawBufLen -= localEnd;
+    rawBufBase = segmentEnd;
+    segmentBytes = 0;
+  }
+
+  const scanner = new XmltvBoundaryScanner({
+    onHeader: (tagSrc) => {
+      header = extractHeaderFields(tagSrc);
+    },
+    onElement: (_which, elBytes, byteStart, byteEnd) => {
+      if (segmentBytes === 0) segmentBase = byteStart;
+      segmentEnd = byteEnd;
+      segmentBytes += elBytes.length;
+      if (segmentEnd - segmentBase >= SEGMENT_TARGET_BYTES) flushSegment();
     },
   });
 
@@ -227,8 +352,8 @@ async function runFromStream(job: StreamJob): Promise<void> {
             type: 'progress',
             bytesDownloaded: bytesRead,
             totalBytes,
-            channelsSeen: indexer.channelsSeen,
-            programmesSeen: indexer.programmesSeen,
+            channelsSeen: scanner.channelsSeen,
+            programmesSeen: scanner.programmesSeen,
           });
         }
         controller.enqueue(chunk);
@@ -251,9 +376,13 @@ async function runFromStream(job: StreamJob): Promise<void> {
       const { done, value } = await reader.read();
       if (done) break;
       if (cancelled) return;
+      if (poolError) throw new Error(poolError);
 
       const bytes = value as Uint8Array;
-      indexer.push(bytes);
+      ensureRawCapacity(bytes.byteLength);
+      rawBuf.set(bytes, rawBufLen);
+      rawBufLen += bytes.byteLength;
+      scanner.push(bytes);
       if (opfsHandle) {
         opfsHandle.write(bytes as BufferSource, { at: offset });
       } else {
@@ -262,43 +391,73 @@ async function runFromStream(job: StreamJob): Promise<void> {
         memUsed += bytes.byteLength;
       }
       offset += bytes.byteLength;
+
+      if (!memoryWarned && offset > MEMORY_WARNING_BYTES) {
+        memoryWarned = true;
+        post({ type: 'memory-warning', decompressedBytes: offset });
+      }
     }
-    indexer.finish();
+    scanner.finish();
+    flushSegment();
 
     post({
       type: 'progress',
       bytesDownloaded: bytesRead,
       totalBytes,
-      channelsSeen: indexer.channelsSeen,
-      programmesSeen: indexer.programmesSeen,
+      channelsSeen: scanner.channelsSeen,
+      programmesSeen: scanner.programmesSeen,
     });
+
+    const segmentResults = await pool.waitForAll();
+    if (poolError) throw new Error(poolError);
+    pool.terminate();
+    activePool = null;
+    if (cancelled) return;
+
+    const merged = mergeSegments(segmentResults);
 
     const index: EpgIndex = {
       header,
-      channels: channelsByOrder,
-      programmesByChannel,
-      totalProgrammeCount: indexer.programmesSeen,
+      channels: merged.channels,
+      programmes: merged.programmes,
+      channelProgrammeStart: merged.channelProgrammeStart,
+      programmeOrder: merged.programmeOrder,
+      totalProgrammeCount: scanner.programmesSeen,
       sourceUrl,
       sourceKind,
       byteLength: offset,
       opfsFileName: opfsHandle ? OPFS_FILE_NAME : null,
-      timeRange: timeRangeStart !== null && timeRangeEnd !== null ? { start: timeRangeStart, end: timeRangeEnd } : null,
+      timeRange: computeTimeRange(merged.programmes),
     };
 
     if (opfsHandle) {
       opfsHandle.flush();
       opfsHandle.close();
-      post({ type: 'done', index });
+      post({ type: 'done', index }, collectIndexTransferables(merged));
     } else {
       const finalBuffer = memBuf!.slice(0, memUsed).buffer;
       post({ type: 'buffer', buffer: finalBuffer }, [finalBuffer]);
-      post({ type: 'done', index });
+      post({ type: 'done', index }, collectIndexTransferables(merged));
     }
   } catch (err) {
     opfsHandle?.close();
+    pool.terminate();
+    activePool = null;
     if (cancelled) return;
     post({ type: 'error', message: String(err), kind: 'unknown' });
   } finally {
     currentAbort = null;
   }
+}
+
+function computeTimeRange(programmes: { count: number; start: Float64Array; stop: Float64Array }): { start: number; end: number } | null {
+  let start: number | null = null;
+  let end: number | null = null;
+  for (let i = 0; i < programmes.count; i++) {
+    const s = programmes.start[i];
+    const e = programmes.stop[i];
+    if (Number.isFinite(s)) start = start === null ? s : Math.min(start, s);
+    if (Number.isFinite(e)) end = end === null ? e : Math.max(end, e);
+  }
+  return start !== null && end !== null ? { start, end } : null;
 }

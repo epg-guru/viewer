@@ -7,7 +7,6 @@ import { xml } from '@codemirror/lang-xml';
 import { linter, lintGutter, type Diagnostic } from '@codemirror/lint';
 import { checkWellFormed } from '../lib/xmltv/wellFormed';
 import { xmlDarkTheme } from '../lib/codeMirrorTheme';
-import { parseXmltvTime } from '../lib/xmltv/time';
 import { validateImageUrl } from '../lib/urlValidation';
 import { useEpgStore } from '../state/epgStore';
 import type { InspectTarget } from './GuideGrid';
@@ -17,10 +16,8 @@ export interface XmlInspectorProps {
   onClose: () => void;
 }
 
-function formatTimeRange(startRaw: string, stopRaw: string): string {
-  const start = parseXmltvTime(startRaw);
-  const stop = parseXmltvTime(stopRaw);
-  if (start === null || stop === null) return `${startRaw} – ${stopRaw}`;
+function formatTimeRange(start: number, stop: number): string {
+  if (!Number.isFinite(start) || !Number.isFinite(stop)) return '';
   const dateFmt: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' };
   const timeFmt: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' };
   const startDate = new Date(start);
@@ -47,7 +44,7 @@ export function XmlInspector({ target, onClose }: XmlInspectorProps) {
   const byteEnd = target?.kind === 'channel' ? target.channel.byteEnd : target?.programme.byteEnd;
   const malformed = target?.kind === 'channel' ? target.channel.malformed : target?.programme.malformed;
 
-  // Fetch the fragment (and check well-formedness) once per target — the
+  // Fetch the fragment (and check well-formedness) once per target, the
   // badges show up immediately even before the user expands the XML source.
   useEffect(() => {
     if (!target || byteStart === undefined || byteEnd === undefined) return;
@@ -128,11 +125,16 @@ export function XmlInspector({ target, onClose }: XmlInspectorProps) {
           )}
           <Stack gap={4} style={{ flex: 1 }}>
             {target.kind === 'channel' ? (
-              <Text size="xs" c="dimmed" ff="monospace">
-                {target.channel.gnid && target.channel.gnid !== target.channel.id
-                  ? `${target.channel.id} · ${target.channel.gnid}`
-                  : target.channel.id}
-              </Text>
+              <>
+                <Text size="xs" c="dimmed" ff="monospace">
+                  {target.channel.id}
+                </Text>
+                {target.channel.gnid && target.channel.gnid !== target.channel.id && (
+                  <Text size="xs" c="dimmed" ff="monospace">
+                    {target.channel.gnid}
+                  </Text>
+                )}
+              </>
             ) : (
               <>
                 {target.programme.subTitle && <Text c="dimmed">{target.programme.subTitle}</Text>}

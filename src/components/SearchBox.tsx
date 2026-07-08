@@ -9,7 +9,7 @@ export interface SearchBoxProps {
 export function SearchBox({ value, onChange }: SearchBoxProps) {
   return (
     <TextInput
-      placeholder="Search channels & programmes…"
+      placeholder="Search…"
       value={value}
       onChange={(e) => onChange(e.currentTarget.value)}
       leftSection={<IconSearch size={16} />}

@@ -3,7 +3,7 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import type { Extension } from '@codemirror/state';
 
-// CodeMirror ships a light theme by default — with no dark base theme
+// CodeMirror ships a light theme by default, with no dark base theme
 // supplied, the editor renders a white gutter/background inside an
 // otherwise all-dark app. This wires it up against the app's actual
 // Mantine dark CSS variables (not hardcoded hex) so it always matches the

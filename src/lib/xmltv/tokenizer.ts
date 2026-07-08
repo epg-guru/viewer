@@ -1,14 +1,27 @@
-import { indexOfBytes, pattern, decodeUtf8, extractAttr, extractFirstElementText, extractSearchText } from './bytes';
-import type { EpgHeader, ChannelEntry, ProgrammeEntry } from './types';
+import { indexOfBytes, pattern, decodeUtf8 } from './bytes';
 
-// Fast, incremental, best-effort XMLTV scanner. It finds <channel>/<programme>
-// element boundaries at the byte level (safe even with multi-byte UTF-8
-// content — see bytes.ts) and extracts just the handful of fields the grid
-// needs, without ever materializing the whole document as one string or DOM
-// tree. It is deliberately NOT a full XML parser: genuine well-formedness
-// checking happens per-fragment, on demand, via DOMParser when a user clicks
-// a cell (see wellFormed.ts). Anything this scanner can't cleanly bound gets
-// flagged `malformed` rather than dropped, so it still shows up in the grid.
+// Fast, incremental, best-effort XMLTV boundary scanner. It finds
+// <channel>/<programme> element boundaries at the byte level (safe even
+// with multi-byte UTF-8 content, see bytes.ts) WITHOUT decoding or
+// extracting any fields, that's deliberately left to the caller (see
+// fieldExtraction.ts), so this same scanner can be reused two ways: the
+// coordinator worker uses it to find safe cut points for segmenting the
+// stream (cheap), and each parser-pool worker uses it again, independently,
+// to walk the elements within its own segment and extract fields (the
+// expensive part, done in parallel). It is deliberately NOT a full XML
+// parser: genuine well-formedness checking happens per-fragment, on demand,
+// via DOMParser when a user clicks a cell (see wellFormed.ts). Anything this
+// scanner can't cleanly bound gets flagged `malformed` rather than dropped.
+//
+// Consumed bytes are tracked via a cursor, NOT by re-slicing `pending` after
+// every element, slicing (copying) the shrinking-but-still-huge remainder
+// after each of potentially tens of thousands of elements in one buffer is
+// classic accidental O(n²) (this bit a first version badly: a 16MB segment
+// with ~30,000 elements pushed in one call effectively copied hundreds of
+// GB before finishing). The buffer is only compacted, consumed prefix
+// actually dropped, once per push(), which is cheap and amortizes fine
+// whether fed many small streaming chunks (the coordinator) or one large
+// blob at once (a segment-parser worker).
 
 const P_TV_OPEN = pattern('<tv');
 const P_CHANNEL_OPEN = pattern('<channel');
@@ -21,10 +34,15 @@ const P_GT = pattern('>');
 // stop waiting and flag it malformed rather than buffering indefinitely.
 const MAX_PENDING_BYTES = 8 * 1024 * 1024;
 
-export interface IndexerCallbacks {
-  onChannel(entry: ChannelEntry): void;
-  onProgramme(entry: ProgrammeEntry): void;
-  onHeader(header: EpgHeader): void;
+export type ElementKind = 'channel' | 'programme';
+
+export interface BoundaryCallbacks {
+  /** `bytes` is a view into this scanner's internal buffer, valid only
+   * synchronously during the callback, copy it if you need to keep it
+   * (the coordinator does, to build segments; see epgParser.worker.ts). */
+  onElement(which: ElementKind, bytes: Uint8Array, byteStart: number, byteEnd: number, malformed: boolean): void;
+  /** Raw `<tv ...>` open-tag source, for the caller to pull attributes from. */
+  onHeader(tagSrc: string): void;
 }
 
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -36,22 +54,41 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out;
 }
 
-export class XmltvIndexer {
+export class XmltvBoundaryScanner {
   private pending: Uint8Array = new Uint8Array(0);
+  private cursor = 0; // read position within `pending`, bytes before this are fully consumed
   private pendingBase = 0; // absolute byte offset of pending[0] in the overall stream
   private sawHeader = false;
-  private readonly cb: IndexerCallbacks;
+  private readonly cb: BoundaryCallbacks;
+  // Real feeds list every <channel> before any <programme> (or vice versa in
+  // segments split mid-file), so once a search for one pattern comes up
+  // empty in the current pending buffer, it stays empty until more data
+  // arrives, caching that avoids re-scanning the (potentially many-MB)
+  // remainder on every single element for the pattern that isn't there.
+  // Without this, a 16MB segment that's ~15,000 back-to-back <programme>
+  // elements would re-scan toward the end hunting for a nonexistent
+  // <channel> on every one of those 15,000 iterations, O(n²) in disguise.
+  private channelExhausted = false;
+  private programmeExhausted = false;
 
   channelsSeen = 0;
   programmesSeen = 0;
 
-  constructor(cb: IndexerCallbacks) {
+  constructor(cb: BoundaryCallbacks) {
     this.cb = cb;
   }
 
-  /** Feed the next chunk of decompressed bytes, in stream order. */
+  /** Feed the next chunk of bytes, in stream order. Any chunk size works,
+   * many small streaming chunks or one large blob are both O(total bytes). */
   push(chunk: Uint8Array): void {
+    if (this.cursor > 0) {
+      this.pending = this.pending.slice(this.cursor);
+      this.pendingBase += this.cursor;
+      this.cursor = 0;
+    }
     this.pending = concat(this.pending, chunk);
+    this.channelExhausted = false;
+    this.programmeExhausted = false;
     this.drain(false);
   }
 
@@ -64,11 +101,13 @@ export class XmltvIndexer {
     if (!this.sawHeader) this.tryParseHeader();
 
     for (;;) {
-      const nextChannel = indexOfBytes(this.pending, P_CHANNEL_OPEN);
-      const nextProgramme = indexOfBytes(this.pending, P_PROGRAMME_OPEN);
+      const nextChannel = this.channelExhausted ? -1 : indexOfBytes(this.pending, P_CHANNEL_OPEN, this.cursor);
+      if (nextChannel === -1) this.channelExhausted = true;
+      const nextProgramme = this.programmeExhausted ? -1 : indexOfBytes(this.pending, P_PROGRAMME_OPEN, this.cursor);
+      if (nextProgramme === -1) this.programmeExhausted = true;
       if (nextChannel === -1 && nextProgramme === -1) break;
 
-      const which: 'channel' | 'programme' =
+      const which: ElementKind =
         nextChannel !== -1 && (nextProgramme === -1 || nextChannel < nextProgramme) ? 'channel' : 'programme';
       const openAt = which === 'channel' ? nextChannel : nextProgramme;
       const closePattern = which === 'channel' ? P_CHANNEL_CLOSE : P_PROGRAMME_CLOSE;
@@ -76,21 +115,25 @@ export class XmltvIndexer {
 
       if (closeAt === -1) {
         if (isFinal) {
-          this.emitMalformed(which, openAt, this.pending.length);
-          this.pending = new Uint8Array(0);
+          this.emit(which, openAt, this.pending.length, true);
+          this.cursor = this.pending.length;
         } else if (this.pending.length - openAt > MAX_PENDING_BYTES) {
-          this.emitMalformed(which, openAt, this.pending.length);
-          this.pending = this.pending.slice(openAt + 1);
-          this.pendingBase += openAt + 1;
+          this.emit(which, openAt, this.pending.length, true);
+          this.cursor = openAt + 1;
         }
         break;
       }
 
       const elEnd = closeAt + closePattern.length;
-      this.emitComplete(which, openAt, elEnd);
-      this.pending = this.pending.slice(elEnd);
-      this.pendingBase += elEnd;
+      this.emit(which, openAt, elEnd, false);
+      this.cursor = elEnd;
     }
+  }
+
+  private emit(which: ElementKind, openAt: number, endAt: number, malformed: boolean): void {
+    if (which === 'channel') this.channelsSeen++;
+    else this.programmesSeen++;
+    this.cb.onElement(which, this.pending.subarray(openAt, endAt), this.pendingBase + openAt, this.pendingBase + endAt, malformed);
   }
 
   private tryParseHeader(): void {
@@ -98,72 +141,7 @@ export class XmltvIndexer {
     if (openAt === -1) return;
     const gtAt = indexOfBytes(this.pending, P_GT, openAt);
     if (gtAt === -1) return; // wait for more bytes
-    const tagSrc = decodeUtf8(this.pending.subarray(openAt, gtAt + 1));
-    this.cb.onHeader({
-      generatorInfoName: extractAttr(tagSrc, 'generator-info-name'),
-      generatorInfoUrl: extractAttr(tagSrc, 'generator-info-url'),
-    });
+    this.cb.onHeader(decodeUtf8(this.pending.subarray(openAt, gtAt + 1)));
     this.sawHeader = true;
-  }
-
-  private emitComplete(which: 'channel' | 'programme', openAt: number, elEnd: number): void {
-    const byteStart = this.pendingBase + openAt;
-    const byteEnd = this.pendingBase + elEnd;
-    const src = decodeUtf8(this.pending.subarray(openAt, elEnd));
-    const openTag = src.slice(0, (src.indexOf('>') + 1 || src.length));
-
-    if (which === 'channel') {
-      const id = extractAttr(openTag, 'id') ?? '';
-      const displayName = extractFirstElementText(src, 'display-name') ?? id;
-      const iconTag = /<icon\b[^>]*>/.exec(src)?.[0] ?? '';
-      const icon = extractAttr(iconTag, 'src');
-      const gnid = extractFirstElementText(src, 'gnid');
-      const searchText = extractSearchText(src);
-      this.channelsSeen++;
-      this.cb.onChannel({ id, displayName, icon, gnid, searchText, byteStart, byteEnd });
-    } else {
-      const channel = extractAttr(openTag, 'channel') ?? '';
-      const start = extractAttr(openTag, 'start') ?? '';
-      const stop = extractAttr(openTag, 'stop') ?? '';
-      const title = extractFirstElementText(src, 'title') ?? '';
-      const subTitle = extractFirstElementText(src, 'sub-title');
-      const category = extractFirstElementText(src, 'category');
-      const desc = extractFirstElementText(src, 'desc');
-      const searchText = extractSearchText(src);
-      this.programmesSeen++;
-      this.cb.onProgramme({ channel, start, stop, title, subTitle, category, desc, searchText, byteStart, byteEnd });
-    }
-  }
-
-  private emitMalformed(which: 'channel' | 'programme', openAt: number, endAt: number): void {
-    const byteStart = this.pendingBase + openAt;
-    const byteEnd = this.pendingBase + endAt;
-    let src = '';
-    try {
-      src = decodeUtf8(this.pending.subarray(openAt, endAt));
-    } catch {
-      // Partial/invalid UTF-8 tail — leave src empty, still record the entry.
-    }
-    const openTag = src.slice(0, (src.indexOf('>') + 1 || src.length));
-
-    if (which === 'channel') {
-      const id = extractAttr(openTag, 'id') ?? '(unknown channel)';
-      const displayName = extractFirstElementText(src, 'display-name') ?? id;
-      const gnid = extractFirstElementText(src, 'gnid');
-      const searchText = extractSearchText(src);
-      this.channelsSeen++;
-      this.cb.onChannel({ id, displayName, gnid, searchText, byteStart, byteEnd, malformed: true });
-    } else {
-      const channel = extractAttr(openTag, 'channel') ?? '(unknown)';
-      const start = extractAttr(openTag, 'start') ?? '';
-      const stop = extractAttr(openTag, 'stop') ?? '';
-      const title = extractFirstElementText(src, 'title') ?? '(unterminated programme)';
-      const subTitle = extractFirstElementText(src, 'sub-title');
-      const category = extractFirstElementText(src, 'category');
-      const desc = extractFirstElementText(src, 'desc');
-      const searchText = extractSearchText(src);
-      this.programmesSeen++;
-      this.cb.onProgramme({ channel, start, stop, title, subTitle, category, desc, searchText, byteStart, byteEnd, malformed: true });
-    }
   }
 }
