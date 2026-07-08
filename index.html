@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover"
+    />
+    <title>EPG Viewer</title>
+    <meta
+      name="description"
+      content="Paste an XMLTV guide URL and browse it as a virtualized channel grid, with click-to-inspect XML for any channel or programme."
+    />
+
+    <!--
+      Static CSP (GitHub Pages can't set response headers). img-src/connect-src
+      allow http:/https: origins (matching src/lib/urlValidation.ts's scheme
+      allowlist exactly) because the whole point of this app is fetching
+      user-supplied EPG URLs and rendering channel logos from them; everything
+      else is locked to 'self'. No unsafe-eval anywhere.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; worker-src 'self'; img-src 'self' http: https: data:; connect-src 'self' http: https:; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+    />
+
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#1971c2" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="EPG Viewer" />
+
+    <!-- Icons (generated from the logo via sethwv-plugins-dev/scripts/generate-pwa-icons.py) -->
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
