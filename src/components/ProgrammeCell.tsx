@@ -12,10 +12,11 @@ export interface ProgrammeCellProps {
    * across the cell. Text stays in normal ink regardless of hue. */
   color: string;
   searchQuery?: string;
+  isCompact?: boolean;
   onInspect: (programme: ProgrammeEntry) => void;
 }
 
-export function ProgrammeCell({ programme, left, width, color, searchQuery = '', onInspect }: ProgrammeCellProps) {
+export function ProgrammeCell({ programme, left, width, color, searchQuery = '', isCompact = false, onInspect }: ProgrammeCellProps) {
   return (
     <UnstyledButton
       onClick={() => onInspect(programme)}
@@ -26,7 +27,7 @@ export function ProgrammeCell({ programme, left, width, color, searchQuery = '',
         top: 4,
         bottom: 4,
         borderRadius: 4,
-        padding: '3px 6px',
+        padding: isCompact ? '2px 5px' : '3px 6px',
         overflow: 'hidden',
         background: programme.malformed ? 'var(--mantine-color-yellow-9)' : hexToRgba(color, 0.18),
         // Longhand border properties throughout (never mixed with the `border`
@@ -55,7 +56,7 @@ export function ProgrammeCell({ programme, left, width, color, searchQuery = '',
         {programme.malformed && <IconAlertTriangle size={12} color="var(--mantine-color-yellow-3)" />}
         <HighlightText text={programme.title || '(untitled)'} query={searchQuery} size="xs" fw={500} truncate />
       </Group>
-      {programme.subTitle && (
+      {!isCompact && programme.subTitle && (
         <HighlightText text={programme.subTitle} query={searchQuery} size="xs" c="dimmed" truncate />
       )}
     </UnstyledButton>

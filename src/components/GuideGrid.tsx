@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useMediaQuery } from '@mantine/hooks';
 import { Text } from '@mantine/core';
 import type { ChannelEntry, EpgIndex, ProgrammeEntry } from '../lib/xmltv/types';
 import { getChannel, getChannelProgrammeIndices, getProgramme, sliceString } from '../lib/xmltv/columnar';
@@ -8,8 +9,11 @@ import { useSettingsStore } from '../state/settingsStore';
 import { ChannelCell } from './ChannelCell';
 import { ProgrammeCell } from './ProgrammeCell';
 
-const CHANNEL_COL_WIDTH = 200;
-const ROW_HEIGHT = 70;
+const COMPACT_QUERY = '(max-width: 640px)';
+const CHANNEL_COL_WIDTH_DEFAULT = 200;
+const CHANNEL_COL_WIDTH_COMPACT = 96;
+const ROW_HEIGHT_DEFAULT = 70;
+const ROW_HEIGHT_COMPACT = 56;
 const DATE_ROW_HEIGHT = 20;
 const HOUR_ROW_HEIGHT = 24;
 const RULER_HEIGHT = DATE_ROW_HEIGHT + HOUR_ROW_HEIGHT;
@@ -63,6 +67,9 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
   const [nowTick, setNowTick] = useState(() => Date.now());
   const query = searchQuery.trim().toLowerCase();
   const searchScope = useSettingsStore((s) => s.searchScope);
+  const isCompact = useMediaQuery(COMPACT_QUERY) ?? false;
+  const CHANNEL_COL_WIDTH = isCompact ? CHANNEL_COL_WIDTH_COMPACT : CHANNEL_COL_WIDTH_DEFAULT;
+  const ROW_HEIGHT = isCompact ? ROW_HEIGHT_COMPACT : ROW_HEIGHT_DEFAULT;
 
   const timelineStart = useMemo(() => floorToHour(index.timeRange?.start ?? Date.now()), [index]);
   const timelineEnd = useMemo(
@@ -400,6 +407,7 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
                   <ChannelCell
                     channel={channel}
                     searchQuery={query}
+                    isCompact={isCompact}
                     onInspect={(ch) => onInspect({ kind: 'channel', channel: ch })}
                   />
                 </div>
@@ -412,6 +420,7 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
                       width={width}
                       color={categoryColors.colorFor(entry.category)}
                       searchQuery={query}
+                      isCompact={isCompact}
                       onInspect={(p) =>
                         onInspect({ kind: 'programme', programme: p, channelName: channel.displayName, channelIcon: channel.icon })
                       }

@@ -24,11 +24,22 @@ export interface ProgrammeFields {
   subTitle?: string;
   category?: string;
   desc?: string;
+  /** <icon> on the <programme> itself, e.g. episode/poster art, distinct
+   * from (and preferred over, when present) the channel's own icon. Not
+   * every feed includes this, callers fall back to the channel icon. */
+  icon?: string;
   searchText: string;
 }
 
 function openTagOf(src: string): string {
   return src.slice(0, src.indexOf('>') + 1 || src.length);
+}
+
+/** XMLTV allows an <icon src="..."/> child on both <channel> and
+ * <programme> elements, same shape either way. */
+function extractIconSrc(src: string): string | undefined {
+  const iconTag = /<icon\b[^>]*>/.exec(src)?.[0] ?? '';
+  return extractAttr(iconTag, 'src');
 }
 
 export function extractChannelFields(bytes: Uint8Array, fallbackId: string): ChannelFields {
@@ -41,8 +52,7 @@ export function extractChannelFields(bytes: Uint8Array, fallbackId: string): Cha
   const openTag = openTagOf(src);
   const id = extractAttr(openTag, 'id') ?? fallbackId;
   const displayName = extractFirstElementText(src, 'display-name') ?? id;
-  const iconTag = /<icon\b[^>]*>/.exec(src)?.[0] ?? '';
-  const icon = extractAttr(iconTag, 'src');
+  const icon = extractIconSrc(src);
   const gnid = extractFirstElementText(src, 'gnid');
   const searchText = extractSearchText(src);
   return { id, displayName, icon, gnid, searchText };
@@ -63,10 +73,11 @@ export function extractProgrammeFields(bytes: Uint8Array, fallbackTitle: string)
   const subTitle = extractFirstElementText(src, 'sub-title');
   const category = extractFirstElementText(src, 'category');
   const desc = extractFirstElementText(src, 'desc');
+  const icon = extractIconSrc(src);
   const searchText = extractSearchText(src);
   const start = parseXmltvTime(startRaw) ?? NaN;
   const stop = parseXmltvTime(stopRaw) ?? NaN;
-  return { channelId, start, stop, title, subTitle, category, desc, searchText };
+  return { channelId, start, stop, title, subTitle, category, desc, icon, searchText };
 }
 
 export function extractHeaderFields(tagSrc: string): { generatorInfoName?: string; generatorInfoUrl?: string } {

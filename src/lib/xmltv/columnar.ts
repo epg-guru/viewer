@@ -109,6 +109,7 @@ export class RawProgrammeColumnsBuilder {
   private subTitleB = new StringFieldBuilder();
   private categoryB = new StringFieldBuilder();
   private descB = new StringFieldBuilder();
+  private iconB = new StringFieldBuilder();
   private searchTextB = new StringFieldBuilder();
   private start: number[] = [];
   private stop: number[] = [];
@@ -123,6 +124,7 @@ export class RawProgrammeColumnsBuilder {
     this.subTitleB.add(fields.subTitle);
     this.categoryB.add(fields.category);
     this.descB.add(fields.desc);
+    this.iconB.add(fields.icon);
     this.searchTextB.add(fields.searchText);
     this.start.push(fields.start);
     this.stop.push(fields.stop);
@@ -142,6 +144,7 @@ export class RawProgrammeColumnsBuilder {
       subTitle: this.subTitleB.build(),
       category: this.categoryB.build(),
       desc: this.descB.build(),
+      icon: this.iconB.build(),
       searchText: this.searchTextB.build(),
       byteStart: Float64Array.from(this.byteStart),
       byteEnd: Float64Array.from(this.byteEnd),
@@ -176,6 +179,7 @@ export function getProgramme(programmes: ProgrammeColumns, channels: ChannelColu
     subTitle: sliceStringOrUndefined(programmes.subTitle, i),
     category: sliceStringOrUndefined(programmes.category, i),
     desc: sliceStringOrUndefined(programmes.desc, i),
+    icon: sliceStringOrUndefined(programmes.icon, i),
     searchText: sliceString(programmes.searchText, i),
     byteStart: programmes.byteStart[i],
     byteEnd: programmes.byteEnd[i],
@@ -280,6 +284,7 @@ function resolveProgrammeColumns(
     subTitle: concatColumnarStrings(parts.map((p) => p.subTitle)),
     category: concatColumnarStrings(parts.map((p) => p.category)),
     desc: concatColumnarStrings(parts.map((p) => p.desc)),
+    icon: concatColumnarStrings(parts.map((p) => p.icon)),
     searchText: concatColumnarStrings(parts.map((p) => p.searchText)),
     byteStart: concatFloat64(parts.map((p) => p.byteStart)),
     byteEnd: concatFloat64(parts.map((p) => p.byteEnd)),
@@ -354,6 +359,7 @@ export function collectRawProgrammeTransferables(list: ArrayBuffer[], pr: RawPro
   pushStringBuffers(list, pr.subTitle);
   pushStringBuffers(list, pr.category);
   pushStringBuffers(list, pr.desc);
+  pushStringBuffers(list, pr.icon);
   pushStringBuffers(list, pr.searchText);
   list.push(pr.start.buffer as ArrayBuffer, pr.stop.buffer as ArrayBuffer, pr.byteStart.buffer as ArrayBuffer, pr.byteEnd.buffer as ArrayBuffer, pr.malformed.buffer as ArrayBuffer);
 }
@@ -363,6 +369,7 @@ export function collectProgrammeTransferables(list: ArrayBuffer[], pr: Programme
   pushStringBuffers(list, pr.subTitle);
   pushStringBuffers(list, pr.category);
   pushStringBuffers(list, pr.desc);
+  pushStringBuffers(list, pr.icon);
   pushStringBuffers(list, pr.searchText);
   list.push(
     pr.channelIndex.buffer as ArrayBuffer,

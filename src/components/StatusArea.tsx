@@ -13,23 +13,24 @@ export function StatusArea() {
 
   if (status === 'checking') {
     return (
-      <Center>
-        <Group gap="xs">
-          <Loader size="xs" />
-          <Text size="sm" c="dimmed">
-            Checking source…
-          </Text>
+      <Center style={{ width: '100%', boxSizing: 'border-box' }} px="xs">
+        <Group gap="xs" justify="center" wrap="wrap" style={{ maxWidth: '100%' }}>
+          <Group gap="xs" wrap="nowrap">
+            <Loader size="xs" />
+            <Text size="sm" c="dimmed">
+              Checking source…
+            </Text>
+          </Group>
+          <Button
+            variant="subtle"
+            color="red"
+            size="compact-xs"
+            leftSection={<IconX size={12} />}
+            onClick={cancelLoad}
+          >
+            Cancel
+          </Button>
         </Group>
-        <Button
-          variant="subtle"
-          color="red"
-          size="compact-xs"
-          ml={6}
-          leftSection={<IconX size={12} />}
-          onClick={cancelLoad}
-        >
-          Cancel
-        </Button>
       </Center>
     );
   }
@@ -37,15 +38,21 @@ export function StatusArea() {
   if (status === 'loading' && progress) {
     const percent = progress.totalBytes ? Math.min(100, (progress.bytesDownloaded / progress.totalBytes) * 100) : null;
     return (
-      <Center>
-        <Stack gap={4} align="center">
-          <Group gap="sm" wrap="nowrap" align="center">
+      <Center style={{ width: '100%', boxSizing: 'border-box' }} px="xs">
+        <Stack gap={4} align="center" style={{ maxWidth: '100%' }}>
+          <Group gap={6} wrap="wrap" justify="center">
+            {/* Each stat + its label is its own nowrap span, so a narrow
+                viewport wraps BETWEEN stats, never splitting a number away
+                from what it's counting. */}
             <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
               {(progress.bytesDownloaded / (1024 * 1024)).toFixed(1)} MB
               {progress.totalBytes ? ` / ${(progress.totalBytes / (1024 * 1024)).toFixed(0)} MB` : ' downloaded'}
-              {' · '}
-              {progress.channelsSeen.toLocaleString()} channels, {progress.programmesSeen.toLocaleString()} programmes
-              indexed
+            </Text>
+            <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+              · {progress.channelsSeen.toLocaleString()} channels,
+            </Text>
+            <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+              {progress.programmesSeen.toLocaleString()} programmes indexed
             </Text>
             <Button
               variant="subtle"
@@ -58,7 +65,11 @@ export function StatusArea() {
               Cancel
             </Button>
           </Group>
-          {percent !== null ? <Progress value={percent} size="sm" style={{ width: 260 }} /> : <Loader size="xs" />}
+          {percent !== null ? (
+            <Progress value={percent} size="sm" style={{ width: '100%', maxWidth: 260 }} />
+          ) : (
+            <Loader size="xs" />
+          )}
         </Stack>
       </Center>
     );

@@ -37,6 +37,9 @@ export interface ProgrammeEntry {
   category?: string;
   /** <desc>, synopsis text. First element only. */
   desc?: string;
+  /** <icon> on the programme itself (episode/poster art), distinct from
+   * (and preferred over, when present) the channel's own icon. */
+  icon?: string;
   /** Lowercased text content of every child element, tags stripped, lets
    * search match fields we don't otherwise surface (credits, episode-num,
    * rating, etc). */
@@ -86,6 +89,7 @@ export interface ProgrammeColumns {
   subTitle: ColumnarStrings;
   category: ColumnarStrings;
   desc: ColumnarStrings;
+  icon: ColumnarStrings;
   searchText: ColumnarStrings;
   byteStart: Float64Array;
   byteEnd: Float64Array;

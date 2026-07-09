@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Modal, Stack, TextInput, Text, Button, Group, Divider, SegmentedControl } from '@mantine/core';
+import { IconRefresh } from '@tabler/icons-react';
 import { validateSourceUrl } from '../lib/urlValidation';
 import { useSettingsStore } from '../state/settingsStore';
+import { useUpdateChecker } from '../hooks/useUpdateChecker';
 
 export interface SettingsMenuProps {
   opened: boolean;
@@ -9,6 +11,7 @@ export interface SettingsMenuProps {
 }
 
 export function SettingsMenu({ opened, onClose }: SettingsMenuProps) {
+  const { checking, checkForUpdates } = useUpdateChecker();
   const sourceMode = useSettingsStore((s) => s.sourceMode);
   const setSourceMode = useSettingsStore((s) => s.setSourceMode);
   const searchScope = useSettingsStore((s) => s.searchScope);
@@ -92,6 +95,18 @@ export function SettingsMenu({ opened, onClose }: SettingsMenuProps) {
           </Button>
         </Group>
       </Stack>
+
+      <Divider my="md" />
+
+      <Button
+        fullWidth
+        variant="default"
+        leftSection={<IconRefresh size={16} />}
+        loading={checking}
+        onClick={checkForUpdates}
+      >
+        Check for app updates
+      </Button>
     </Modal>
   );
 }

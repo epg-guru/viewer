@@ -1,0 +1,25 @@
+/* The grid's own internal viewport (GuideGrid.tsx's scrollRef container) is
+   the only element meant to scroll. Constraining every ancestor to exactly
+   the viewport height, with overflow hidden, guarantees the page itself can
+   never grow past it and introduce a second, outer scrollbar, regardless of
+   content-sizing edge cases (wrapped error text, mobile browser chrome). */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ui-kit's AppHeader renders header actions as a filled Button in the
+   theme's primary color, with no color/variant override exposed via props
+   (see HeaderAction in dispatch-ui-kit.d.ts). Scoped to just the header so
+   it doesn't touch unrelated primary-colored buttons elsewhere (Go/Refresh
+   in SourceBar, etc.) — overrides Button's own CSS-variable styling API
+   with the same tokens Mantine's variant="default" uses everywhere else in
+   this app, so it matches pixel-for-pixel rather than being a one-off color. */
+.mantine-AppShell-header .mantine-Button-root {
+  --button-bg: var(--mantine-color-default);
+  --button-hover: var(--mantine-color-default-hover);
+  --button-color: var(--mantine-color-default-color);
+  --button-bd: calc(0.0625rem * var(--mantine-scale)) solid var(--mantine-color-default-border);
+}

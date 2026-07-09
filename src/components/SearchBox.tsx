@@ -20,7 +20,7 @@ export function SearchBox({ value, onChange }: SearchBoxProps) {
           </ActionIcon>
         ) : null
       }
-      style={{ minWidth: 240 }}
+      style={{ flex: 1, minWidth: 160 }}
     />
   );
 }

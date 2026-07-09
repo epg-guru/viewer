@@ -8,12 +8,14 @@ import { HighlightText } from './HighlightText';
 export interface ChannelCellProps {
   channel: ChannelEntry;
   searchQuery?: string;
+  isCompact?: boolean;
   onInspect: (channel: ChannelEntry) => void;
 }
 
-export function ChannelCell({ channel, searchQuery = '', onInspect }: ChannelCellProps) {
+export function ChannelCell({ channel, searchQuery = '', isCompact = false, onInspect }: ChannelCellProps) {
   const [imgError, setImgError] = useState(false);
   const safeIcon = validateImageUrl(channel.icon);
+  const iconSize = 32;
 
   // Show gnid only when it's actually informative: skip it if missing or
   // identical to id (nothing extra to say).
@@ -22,14 +24,25 @@ export function ChannelCell({ channel, searchQuery = '', onInspect }: ChannelCel
   return (
     <UnstyledButton
       onClick={() => onInspect(channel)}
-      style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', padding: '0 8px' }}
+      style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', padding: isCompact ? '0 6px' : '0 8px' }}
     >
       <Group gap="xs" wrap="nowrap" style={{ overflow: 'hidden', width: '100%' }}>
-        {safeIcon && !imgError ? (
-          <Image src={safeIcon} onError={() => setImgError(true)} h={32} w={32} fit="contain" style={{ flexShrink: 0 }} />
-        ) : (
-          <div style={{ width: 32, height: 32, flexShrink: 0 }} />
-        )}
+        {/* Collapsed entirely on compact rows, not just shrunk — the
+            column is narrow enough there that the logo crowds out the
+            name/id, which matter more for navigating. */}
+        {!isCompact &&
+          (safeIcon && !imgError ? (
+            <Image
+              src={safeIcon}
+              onError={() => setImgError(true)}
+              h={iconSize}
+              w={iconSize}
+              fit="contain"
+              style={{ flexShrink: 0 }}
+            />
+          ) : (
+            <div style={{ width: iconSize, height: iconSize, flexShrink: 0 }} />
+          ))}
         <Stack gap={0} style={{ flex: 1, overflow: 'hidden' }}>
           <HighlightText text={channel.displayName || channel.id} query={searchQuery} size="sm" truncate />
           {channel.id && (

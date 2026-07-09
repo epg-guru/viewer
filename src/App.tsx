@@ -10,14 +10,17 @@ import { SizeWarningModal } from './components/SizeWarningModal';
 import { MemoryWarningModal } from './components/MemoryWarningModal';
 import { EpgHeaderInfo } from './components/EpgHeaderInfo';
 import { GuideGrid, type InspectTarget } from './components/GuideGrid';
-import { Footer } from './components/Footer';
 import { StatusArea } from './components/StatusArea';
 import { SettingsMenu } from './components/SettingsMenu';
 import { SearchBox } from './components/SearchBox';
 
-// CodeMirror + the XML language/lint packages are only needed once a user
-// clicks a cell, so keep them out of the initial bundle.
-const XmlInspector = lazy(() => import('./components/XmlInspector').then((m) => ({ default: m.XmlInspector })));
+// CodeMirror + the XML language/lint packages (pulled in by both modals via
+// the shared XmlSourceSection) are only needed once a user clicks a cell, so
+// keep them out of the initial bundle.
+const ChannelModal = lazy(() => import('./components/inspector/ChannelModal').then((m) => ({ default: m.ChannelModal })));
+const ProgrammeModal = lazy(() =>
+  import('./components/inspector/ProgrammeModal').then((m) => ({ default: m.ProgrammeModal })),
+);
 
 export function App() {
   const status = useEpgStore((s) => s.status);
@@ -48,18 +51,16 @@ export function App() {
   }, [status, sourceKind, sourceUrl]);
 
   return (
-    <AppShell header={{ height: 56 }} footer={{ height: 28 }} padding="md">
+    <AppShell header={{ height: 56 }} padding="md">
       <AppHeader
         logoUrl={`${import.meta.env.BASE_URL}logo.png`}
         appName="EPG Viewer"
-        version={__COMMIT_HASH__}
+        version={`${__COMMIT_HASH__} · ${__BUILD_DATE__}`}
         githubUrl="https://github.com/epg-guru/viewer"
         kofiUrl={null}
-        actions={[
-          { key: 'settings', label: 'Settings', icon: IconSettings, onClick: () => setSettingsOpen(true) },
-        ]}
+        actions={[{ key: 'settings', label: 'Settings', icon: IconSettings, onClick: () => setSettingsOpen(true) }]}
       />
-      <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - var(--app-shell-header-height))' }}>
         <Stack gap="sm" pt="xs" pb="sm" style={{ flexShrink: 0 }}>
           <SourceBar />
           <StatusArea />
@@ -134,22 +135,29 @@ export function App() {
                 overflow: 'hidden',
               }}
             >
-              <EpgHeaderInfo index={index} />
+              <div style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
+                <EpgHeaderInfo index={index} />
+              </div>
             </Group>
           )}
         </div>
       </AppShell.Main>
-
-      <AppShell.Footer>
-        <Footer />
-      </AppShell.Footer>
 
       <SizeWarningModal />
       <MemoryWarningModal />
       <SettingsMenu opened={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {inspectTarget && (
         <Suspense fallback={null}>
-          <XmlInspector target={inspectTarget} onClose={() => setInspectTarget(null)} />
+          {inspectTarget.kind === 'channel' ? (
+            <ChannelModal channel={inspectTarget.channel} onClose={() => setInspectTarget(null)} />
+          ) : (
+            <ProgrammeModal
+              programme={inspectTarget.programme}
+              channelName={inspectTarget.channelName}
+              channelIcon={inspectTarget.channelIcon}
+              onClose={() => setInspectTarget(null)}
+            />
+          )}
         </Suspense>
       )}
     </AppShell>
