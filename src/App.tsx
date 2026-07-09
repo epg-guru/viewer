@@ -13,6 +13,7 @@ import { GuideGrid, type InspectTarget } from './components/GuideGrid';
 import { StatusArea } from './components/StatusArea';
 import { SettingsMenu } from './components/SettingsMenu';
 import { SearchBox } from './components/SearchBox';
+import { DateJumpSelect } from './components/DateJumpSelect';
 
 // CodeMirror + the XML language/lint packages (pulled in by both modals via
 // the shared XmlSourceSection) are only needed once a user clicks a cell, so
@@ -31,7 +32,18 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery] = useDebouncedValue(searchInput, 200);
-  const [jumpToNowSignal, setJumpToNowSignal] = useState(0);
+  const [jumpSignal, setJumpSignal] = useState(0);
+  const [jumpTargetMs, setJumpTargetMs] = useState<number | null>(null);
+
+  function jumpToNow(): void {
+    setJumpTargetMs(null);
+    setJumpSignal((n) => n + 1);
+  }
+
+  function jumpToDate(ms: number): void {
+    setJumpTargetMs(ms);
+    setJumpSignal((n) => n + 1);
+  }
 
   // Keep ?url= in sync with whatever's actually loaded, regardless of which
   // source-mode control is currently shown.
@@ -61,7 +73,7 @@ export function App() {
         actions={[{ key: 'settings', label: 'Settings', icon: IconSettings, onClick: () => setSettingsOpen(true) }]}
       />
       <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - var(--app-shell-header-height))' }}>
-        <Stack gap="sm" pt="xs" pb="sm" style={{ flexShrink: 0 }}>
+        <Stack gap="sm" pb="sm" style={{ flexShrink: 0 }}>
           <SourceBar />
           <StatusArea />
         </Stack>
@@ -91,14 +103,12 @@ export function App() {
                 borderBottom: '1px solid var(--mantine-color-dark-4)',
               }}
             >
-              <Button
-                variant="default"
-                size="sm"
-                leftSection={<IconCalendarTime size={16} />}
-                onClick={() => setJumpToNowSignal((n) => n + 1)}
-              >
-                Today
-              </Button>
+              <Group gap="xs" wrap="wrap">
+                <Button variant="default" size="sm" leftSection={<IconCalendarTime size={16} />} onClick={jumpToNow}>
+                  Now
+                </Button>
+                <DateJumpSelect index={index} onSelect={jumpToDate} />
+              </Group>
               <SearchBox value={searchInput} onChange={setSearchInput} />
             </Group>
           )}
@@ -108,7 +118,8 @@ export function App() {
                 index={index}
                 onInspect={setInspectTarget}
                 searchQuery={searchQuery.trim()}
-                jumpToNowSignal={jumpToNowSignal}
+                jumpSignal={jumpSignal}
+                jumpTargetMs={jumpTargetMs}
               />
             ) : status === 'loading' || status === 'checking' ? (
               <Center h="100%">

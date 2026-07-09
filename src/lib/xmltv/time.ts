@@ -12,3 +12,26 @@ export function parseXmltvTime(raw: string): number | null {
   const offsetMinutes = Math.abs(Number(tzh)) * 60 * sign + Number(tzm) * sign;
   return utcMillis - offsetMinutes * 60_000;
 }
+
+/** Calendar-day boundaries are meaningful in the viewer's local time, not
+ * UTC — unlike the raw epoch-ms fields, which only need DST-safe arithmetic. */
+export function floorToLocalMidnight(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** Every local calendar day from startMs through endMs (inclusive), as
+ * local-midnight epoch ms — the set of dates a loaded feed actually spans,
+ * used to populate the date-jump control with real options only. */
+export function enumerateLocalDays(startMs: number, endMs: number): number[] {
+  const days: number[] = [];
+  let cursor = floorToLocalMidnight(startMs);
+  while (cursor <= endMs) {
+    days.push(cursor);
+    const next = new Date(cursor);
+    next.setDate(next.getDate() + 1);
+    cursor = next.getTime();
+  }
+  return days;
+}

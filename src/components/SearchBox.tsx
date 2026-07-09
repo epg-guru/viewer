@@ -1,5 +1,8 @@
 import { TextInput, ActionIcon } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { IconSearch, IconX } from '@tabler/icons-react';
+
+const COMPACT_QUERY = '(max-width: 640px)';
 
 export interface SearchBoxProps {
   value: string;
@@ -7,6 +10,8 @@ export interface SearchBoxProps {
 }
 
 export function SearchBox({ value, onChange }: SearchBoxProps) {
+  const isCompact = useMediaQuery(COMPACT_QUERY) ?? false;
+
   return (
     <TextInput
       placeholder="Search…"
@@ -20,7 +25,7 @@ export function SearchBox({ value, onChange }: SearchBoxProps) {
           </ActionIcon>
         ) : null
       }
-      style={{ flex: 1, minWidth: 160 }}
+      style={isCompact ? { flex: 1, minWidth: 160 } : { width: 260 }}
     />
   );
 }

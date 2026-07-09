@@ -4,6 +4,7 @@ import { useMediaQuery } from '@mantine/hooks';
 import { Text } from '@mantine/core';
 import type { ChannelEntry, EpgIndex, ProgrammeEntry } from '../lib/xmltv/types';
 import { getChannel, getChannelProgrammeIndices, getProgramme, sliceString } from '../lib/xmltv/columnar';
+import { floorToLocalMidnight } from '../lib/xmltv/time';
 import { buildCategoryColorMap } from '../lib/categoryColors';
 import { useSettingsStore } from '../state/settingsStore';
 import { ChannelCell } from './ChannelCell';
@@ -33,8 +34,13 @@ export interface GuideGridProps {
   index: EpgIndex;
   onInspect: (target: InspectTarget) => void;
   searchQuery?: string;
-  /** Bump this (e.g. from a "Today" button) to re-run the jump-to-now scroll. */
-  jumpToNowSignal?: number;
+  /** Bump this (e.g. from the "Now" button or the date-jump select) to
+   * re-run the auto-scroll effect. */
+  jumpSignal?: number;
+  /** Where to scroll on a jumpSignal bump — null jumps to now (minus the
+   * usual lead), a timestamp (e.g. a picked date's local midnight) jumps
+   * there directly. */
+  jumpTargetMs?: number | null;
 }
 
 // searchText already covers title/subTitle/category/desc/etc, every text
@@ -52,15 +58,7 @@ function floorToHour(ms: number): number {
   return d.getTime();
 }
 
-// Calendar-day boundaries are meaningful in the viewer's local time, not
-// UTC, unlike floorToHour above, which only needs DST-safe hour alignment.
-function floorToLocalMidnight(ms: number): number {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
-export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal = 0 }: GuideGridProps) {
+export function GuideGrid({ index, onInspect, searchQuery = '', jumpSignal = 0, jumpTargetMs = null }: GuideGridProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
@@ -144,16 +142,17 @@ export function GuideGrid({ index, onInspect, searchQuery = '', jumpToNowSignal 
 
   // Open the guide already centered near the present, rather than at the
   // very start of the (possibly multi-day) loaded range. Runs once per
-  // newly loaded source, and again whenever jumpToNowSignal is bumped (the
-  // "Today" button).
+  // newly loaded source, and again whenever jumpSignal is bumped (the "Now"
+  // button, or picking a date from the date-jump select). jumpTargetMs null
+  // means "now" (minus the usual lead); a timestamp jumps straight there.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const target = Date.now() - AUTO_SCROLL_LEAD_MINUTES * 60_000;
+    const target = jumpTargetMs != null ? jumpTargetMs : Date.now() - AUTO_SCROLL_LEAD_MINUTES * 60_000;
     const clamped = Math.min(Math.max(target, timelineStart), timelineEnd);
     el.scrollLeft = Math.max(0, ((clamped - timelineStart) / 60_000) * PX_PER_MINUTE);
     setScrollLeft(el.scrollLeft);
-  }, [index, timelineStart, timelineEnd, jumpToNowSignal]);
+  }, [index, timelineStart, timelineEnd, jumpSignal, jumpTargetMs]);
 
   const viewStartMs = timelineStart + (scrollLeft / PX_PER_MINUTE) * 60_000 - BUFFER_MINUTES * 60_000;
   const viewEndMs = timelineStart + ((scrollLeft + viewportWidth) / PX_PER_MINUTE) * 60_000 + BUFFER_MINUTES * 60_000;
