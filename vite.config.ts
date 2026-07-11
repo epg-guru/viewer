@@ -35,10 +35,11 @@ function swCacheVersion(hash: string): Plugin {
   };
 }
 
-// base must match the GitHub Pages repo path (github.com/epg-guru/viewer)
-// so built asset URLs resolve correctly under the project-page subpath.
+// Relative base so the same build works whether served from a domain
+// root (viewer.epg.guru via CNAME) or a subpath (e.g. GitHub Pages
+// project page /viewer/) — avoids hardcoding a single deploy target.
 export default defineConfig({
-  base: '/viewer/',
+  base: './',
   plugins: [react(), swCacheVersion(HASH)],
   resolve: {
     dedupe: ['react', 'react-dom', '@mantine/core', '@mantine/hooks', '@mantine/notifications'],

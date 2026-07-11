@@ -20,7 +20,7 @@ use.
 
 1. `npm install -g wrangler` (or `npx wrangler`), then `wrangler login`.
 2. Edit `worker.js` and set `ALLOWED_ORIGIN` to your deployed app's exact
-   origin (e.g. `https://epg-guru.github.io`).
+   origin (e.g. `https://viewer.epg.guru`).
 3. From this directory: `wrangler deploy`.
 4. Copy the resulting `https://*.workers.dev` URL into the app's Settings
    menu (gear icon next to Presets).

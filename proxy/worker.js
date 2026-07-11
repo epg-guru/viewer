@@ -10,8 +10,8 @@
 // boundary for anything sensitive.
 
 // TODO: set this to your deployed app's exact origin, e.g.
-// "https://epg-guru.github.io".
-const ALLOWED_ORIGIN = 'https://epg-guru.github.io';
+// "https://viewer.epg.guru".
+const ALLOWED_ORIGIN = 'https://viewer.epg.guru';
 
 // Best-effort cap — only enforced when upstream sends Content-Length.
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024 * 1024;
