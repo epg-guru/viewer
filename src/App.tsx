@@ -1,16 +1,14 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { AppShell, Center, Stack, Group, Text, Button } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
-import { IconSettings, IconCalendarTime } from '@tabler/icons-react';
+import { IconCalendarTime } from '@tabler/icons-react';
 import { AppHeader } from '@swvn-dispatch/dispatch-ui-kit';
 import { useEpgStore } from './state/epgStore';
 import { SourceBar } from './components/SourceBar';
 import { EmptyState } from './components/EmptyState';
-import { SizeWarningModal } from './components/SizeWarningModal';
-import { MemoryWarningModal } from './components/MemoryWarningModal';
 import { EpgHeaderInfo } from './components/EpgHeaderInfo';
 import { GuideGrid, type InspectTarget } from './components/GuideGrid';
-import { StatusArea } from './components/StatusArea';
+import { ProgressModal } from './components/ProgressModal';
 import { SettingsMenu } from './components/SettingsMenu';
 import { SearchBox } from './components/SearchBox';
 import { DateJumpSelect } from './components/DateJumpSelect';
@@ -29,7 +27,6 @@ export function App() {
   const sourceUrl = useEpgStore((s) => s.sourceUrl);
   const sourceKind = useEpgStore((s) => s.sourceKind);
   const [inspectTarget, setInspectTarget] = useState<InspectTarget | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery] = useDebouncedValue(searchInput, 200);
   const [jumpSignal, setJumpSignal] = useState(0);
@@ -70,12 +67,11 @@ export function App() {
         version={`${__COMMIT_HASH__} · ${__BUILD_DATE__}`}
         githubUrl="https://github.com/epg-guru/viewer"
         kofiUrl={null}
-        actions={[{ key: 'settings', label: 'Settings', icon: IconSettings, onClick: () => setSettingsOpen(true) }]}
+        extra={<SettingsMenu />}
       />
       <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - var(--app-shell-header-height))' }}>
         <Stack gap="sm" pb="sm" style={{ flexShrink: 0 }}>
           <SourceBar />
-          <StatusArea />
         </Stack>
 
         <div
@@ -121,7 +117,7 @@ export function App() {
                 jumpSignal={jumpSignal}
                 jumpTargetMs={jumpTargetMs}
               />
-            ) : status === 'loading' || status === 'checking' ? (
+            ) : status === 'loading' ? (
               <Center h="100%">
                 <Text c="dimmed" size="sm">
                   Loading…
@@ -154,9 +150,7 @@ export function App() {
         </div>
       </AppShell.Main>
 
-      <SizeWarningModal />
-      <MemoryWarningModal />
-      <SettingsMenu opened={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <ProgressModal />
       {inspectTarget && (
         <Suspense fallback={null}>
           {inspectTarget.kind === 'channel' ? (

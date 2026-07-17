@@ -44,16 +44,40 @@ export function decodeXmlEntities(s: string): string {
   });
 }
 
+// Field/attribute names come from a small closed set (id, channel, start,
+// stop, title, sub-title, category, desc, ...), so the compiled RegExp for
+// each is cached rather than rebuilt from a template string on every one of
+// the hundreds of thousands of calls a large feed makes. Safe to reuse
+// across calls: neither pattern uses the `g`/`y` flags, so there's no
+// `lastIndex` state to reset between invocations.
+const attrRegexCache = new Map<string, RegExp>();
+function attrRegex(name: string): RegExp {
+  let re = attrRegexCache.get(name);
+  if (!re) {
+    re = new RegExp(`[\\s"']${name}\\s*=\\s*"([^"]*)"|^${name}\\s*=\\s*"([^"]*)"`);
+    attrRegexCache.set(name, re);
+  }
+  return re;
+}
+
+const elementTextRegexCache = new Map<string, RegExp>();
+function elementTextRegex(tag: string): RegExp {
+  let re = elementTextRegexCache.get(tag);
+  if (!re) {
+    re = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`);
+    elementTextRegexCache.set(tag, re);
+  }
+  return re;
+}
+
 export function extractAttr(tagSource: string, name: string): string | undefined {
-  const re = new RegExp(`[\\s"']${name}\\s*=\\s*"([^"]*)"|^${name}\\s*=\\s*"([^"]*)"`);
-  const m = re.exec(tagSource);
+  const m = attrRegex(name).exec(tagSource);
   const value = m?.[1] ?? m?.[2];
   return value !== undefined ? decodeXmlEntities(value) : undefined;
 }
 
 export function extractFirstElementText(source: string, tag: string): string | undefined {
-  const re = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`);
-  const m = re.exec(source);
+  const m = elementTextRegex(tag).exec(source);
   return m ? decodeXmlEntities(m[1].trim()) : undefined;
 }
 

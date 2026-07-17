@@ -131,13 +131,6 @@ export type ParserProgressMessage = {
   segmentsDone: number;
 };
 
-/** Decompressed size crossed the soft memory-safety threshold. Advisory
- * only, parsing continues; the UI just surfaces a heads-up. */
-export type ParserMemoryWarningMessage = {
-  type: 'memory-warning';
-  decompressedBytes: number;
-};
-
 export type ParserDoneMessage = {
   type: 'done';
   index: EpgIndex;
@@ -157,7 +150,6 @@ export type ParserBufferMessage = {
 
 export type ParserMessage =
   | ParserProgressMessage
-  | ParserMemoryWarningMessage
   | ParserDoneMessage
   | ParserErrorMessage
   | ParserBufferMessage;

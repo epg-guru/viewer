@@ -14,10 +14,6 @@ const PROGRESS_INTERVAL_MS = 200;
 // handful of workers can all stay busy rather than waiting on one giant
 // chunk at the end.
 const SEGMENT_TARGET_BYTES = 16 * 1024 * 1024;
-// Advisory-only heads-up once decompressed size crosses this, the
-// pre-flight HEAD check only sees compressed size, and gzip ratios vary
-// widely enough that a modest download can still expand to multiple GB.
-const MEMORY_WARNING_BYTES = 1.5 * 1024 * 1024 * 1024;
 
 // This worker is the coordinator: it owns the one genuinely sequential part
 // of the pipeline (fetch, gzip decompression, the single-writer OPFS
@@ -253,6 +249,23 @@ class WorkerPool {
     worker.postMessage(request, [owned.buffer]);
   }
 
+  /** Like dispatch(), but for a buffer the caller already exclusively owns
+   * (e.g. a segment copied out earlier for deferred dispatch) — skips the
+   * redundant internal copy since there's no shared buffer left to protect. */
+  dispatchOwned(bytes: Uint8Array, baseOffset: number, sequence: number): void {
+    if (this.failed) return;
+    const worker = this.workers[this.next];
+    this.next = (this.next + 1) % this.workers.length;
+    this.dispatched++;
+    // Same TS lib generic-widening quirk as elsewhere in this file (see the
+    // ReadableStream/DecompressionStream comment above): bytes.buffer is
+    // typed ArrayBufferLike, but the runtime contract (an owned, non-shared
+    // ArrayBuffer) is guaranteed by callers of dispatchOwned.
+    const buffer = bytes.buffer as ArrayBuffer;
+    const request: SegmentParseRequest = { type: 'parse-segment', bytes: buffer, baseOffset, sequence };
+    worker.postMessage(request, [buffer]);
+  }
+
   private checkDone(): void {
     if (this.settled >= this.dispatched) this.onAllSettled?.();
   }
@@ -274,13 +287,14 @@ class WorkerPool {
 }
 
 /**
- * A `.gz`-named source only tells us the *intended* format, not the actual
- * bytes — we've seen upstream sources serve a `.xml.gz` URL that's actually
- * plain uncompressed XML (wrong content, right extension), which makes
- * DecompressionStream throw "incorrect header check" if applied blindly.
- * Peek the first chunk for the real gzip magic (0x1f 0x8b) before deciding
- * whether to decompress, falling back to treating the source as already-
- * plain content when it isn't.
+ * Neither the URL/filename extension nor the Content-Encoding header reliably
+ * tells us whether the bytes we're about to read are gzip-compressed: we've
+ * seen upstream sources serve a `.xml.gz` URL that's actually plain
+ * uncompressed XML (wrong content, right extension), and CDNs (e.g.
+ * Cloudflare) can transparently decompress — or in principle leave compressed
+ * — a response independently of what the URL implies. Always peek the first
+ * chunk for the real gzip magic (0x1f 0x8b) and decide from that alone,
+ * regardless of filename or headers.
  */
 async function resolveGzipStream(stream: ReadableStream<Uint8Array>): Promise<ReadableStream<Uint8Array>> {
   const reader = stream.getReader();
@@ -324,12 +338,17 @@ async function resolveGzipStream(stream: ReadableStream<Uint8Array>): Promise<Re
 }
 
 async function runFromStream(job: StreamJob): Promise<void> {
-  const { compression, totalBytes, sourceUrl, sourceKind } = job;
+  const { sourceUrl, sourceKind } = job;
+  // Mutable: a declared Content-Length can be wrong (e.g. a CDN that
+  // transparently decompresses a .gz response without correcting the header
+  // — see the comment on isTransportEncoded in runFromUrl). Once actually
+  // measured bytes exceed it, stop trusting it and fall back to the UI's
+  // indeterminate-progress path rather than showing a nonsensical overshoot.
+  let totalBytes = job.totalBytes;
 
   let bytesRead = 0;
   let lastProgressPost = 0;
   let header: EpgHeader = {};
-  let memoryWarned = false;
 
   function postProgress(force = false): void {
     const now = Date.now();
@@ -346,7 +365,10 @@ async function runFromStream(job: StreamJob): Promise<void> {
     });
   }
 
-  const poolSize = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 4));
+  // Capped well above the old limit of 4 so 6/8/12-core machines (common
+  // today) actually get used for the CPU-bound parse phase, while still
+  // bounding worker count on unusually high-core-count machines.
+  const poolSize = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 8));
   let poolError: string | null = null;
   const pool = new WorkerPool(
     poolSize,
@@ -390,12 +412,20 @@ async function runFromStream(job: StreamJob): Promise<void> {
     rawBuf = grown;
   }
 
+  // Segments are queued here rather than dispatched to the parser pool
+  // immediately, so parsing only begins once the whole source has downloaded
+  // (see the dispatch loop at the end of the try block below) instead of
+  // running concurrently with the download.
+  const pendingSegments: { bytes: Uint8Array; baseOffset: number; sequence: number }[] = [];
+
   function flushSegment(): void {
     if (segmentBytes === 0) return;
     const localStart = segmentBase - rawBufBase;
     const localEnd = segmentEnd - rawBufBase;
     const slice = rawBuf.subarray(localStart, localEnd);
-    pool.dispatch(slice, segmentBase, sequence++);
+    // Copy now (not a view): rawBuf keeps mutating via copyWithin/growth
+    // after this point, but this segment won't be dispatched until later.
+    pendingSegments.push({ bytes: slice.slice(), baseOffset: segmentBase, sequence: sequence++ });
     rawBuf.copyWithin(0, localEnd, rawBufLen);
     rawBufLen -= localEnd;
     rawBufBase = segmentEnd;
@@ -436,6 +466,7 @@ async function runFromStream(job: StreamJob): Promise<void> {
     return new TransformStream({
       transform(chunk, controller) {
         bytesRead += chunk.byteLength;
+        if (totalBytes !== null && bytesRead > totalBytes) totalBytes = null;
         postProgress();
         controller.enqueue(chunk);
       },
@@ -443,10 +474,9 @@ async function runFromStream(job: StreamJob): Promise<void> {
   }
 
   try {
-    let stream: ReadableStream<Uint8Array> = job.body.pipeThrough(progressTap());
-    if (compression === 'gzip') {
-      stream = await resolveGzipStream(stream);
-    }
+    // Always sniff for gzip magic bytes, independent of the `compression`
+    // guess (URL/filename extension) — see resolveGzipStream's doc comment.
+    let stream: ReadableStream<Uint8Array> = await resolveGzipStream(job.body.pipeThrough(progressTap()));
 
     const reader = stream.getReader();
     let offset = 0;
@@ -469,15 +499,11 @@ async function runFromStream(job: StreamJob): Promise<void> {
         memUsed += bytes.byteLength;
       }
       offset += bytes.byteLength;
-
-      if (!memoryWarned && offset > MEMORY_WARNING_BYTES) {
-        memoryWarned = true;
-        post({ type: 'memory-warning', decompressedBytes: offset });
-      }
     }
     scanner.finish();
     flushSegment();
-    postProgress(true);
+    for (const seg of pendingSegments) pool.dispatchOwned(seg.bytes, seg.baseOffset, seg.sequence);
+    postProgress(true); // first post with segmentsTotal > 0 — flips the UI to the parse phase
 
     const segmentResults = await pool.waitForAll();
     if (poolError) throw new Error(poolError);
