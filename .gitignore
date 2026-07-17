@@ -20,6 +20,10 @@ dist/
 *.local
 .DS_Store
 
+# Generated at build time by scripts/build-catalog.mjs (see package.json
+# "catalog"/"build" scripts) — always regenerated fresh, never stale.
+src/data/epgGuruCatalog.json
+
 # Consumer apps pin the ui-kit exactly, so this lockfile isn't tracked
 # (matches multiview/source-switch convention).
 package-lock.json

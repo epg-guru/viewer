@@ -251,6 +251,56 @@ class WorkerPool {
   }
 }
 
+/**
+ * A `.gz`-named source only tells us the *intended* format, not the actual
+ * bytes — we've seen upstream sources serve a `.xml.gz` URL that's actually
+ * plain uncompressed XML (wrong content, right extension), which makes
+ * DecompressionStream throw "incorrect header check" if applied blindly.
+ * Peek the first chunk for the real gzip magic (0x1f 0x8b) before deciding
+ * whether to decompress, falling back to treating the source as already-
+ * plain content when it isn't.
+ */
+async function resolveGzipStream(stream: ReadableStream<Uint8Array>): Promise<ReadableStream<Uint8Array>> {
+  const reader = stream.getReader();
+  let first: Uint8Array | undefined;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      reader.releaseLock();
+      return stream;
+    }
+    if (value.byteLength > 0) {
+      first = value;
+      break;
+    }
+  }
+
+  const isGzip = first.length >= 2 && first[0] === 0x1f && first[1] === 0x8b;
+
+  const rebuilt = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(first!);
+    },
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(value);
+    },
+    cancel(reason) {
+      void reader.cancel(reason);
+    },
+  });
+
+  if (!isGzip) return rebuilt;
+  // TS's ReadableStream/DecompressionStream generic types don't line up
+  // cleanly across lib versions (Uint8Array<ArrayBuffer> vs
+  // <ArrayBufferLike>); the runtime contract (bytes in, bytes out) is fine.
+  return (rebuilt as ReadableStream<any>).pipeThrough(new DecompressionStream('gzip') as any);
+}
+
 async function runFromStream(job: StreamJob): Promise<void> {
   const { compression, totalBytes, sourceUrl, sourceKind } = job;
 
@@ -364,10 +414,7 @@ async function runFromStream(job: StreamJob): Promise<void> {
   try {
     let stream: ReadableStream<Uint8Array> = job.body.pipeThrough(progressTap());
     if (compression === 'gzip') {
-      // TS's ReadableStream/DecompressionStream generic types don't line up
-      // cleanly across lib versions (Uint8Array<ArrayBuffer> vs
-      // <ArrayBufferLike>); the runtime contract (bytes in, bytes out) is fine.
-      stream = (stream as ReadableStream<any>).pipeThrough(new DecompressionStream('gzip') as any);
+      stream = await resolveGzipStream(stream);
     }
 
     const reader = stream.getReader();

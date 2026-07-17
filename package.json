@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && tsc -p tsconfig.worker.json && vite build",
+    "predev": "node scripts/build-catalog.mjs",
+    "catalog": "node scripts/build-catalog.mjs --force",
+    "build": "npm run catalog && tsc && tsc -p tsconfig.worker.json && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -16,7 +18,7 @@
     "@mantine/core": "~8.0.1",
     "@mantine/hooks": "~8.0.1",
     "@mantine/notifications": "~8.0.1",
-    "@swvn-dispatch/dispatch-ui-kit": "0.1.9",
+    "@swvn-dispatch/dispatch-ui-kit": "0.1.12",
     "@tabler/icons-react": "^3.31.0",
     "@tanstack/react-virtual": "^3.10.9",
     "codemirror": "^6.0.1",
