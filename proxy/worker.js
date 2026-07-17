@@ -87,11 +87,18 @@ export default {
       return new Response('Upstream response too large', { status: 413, headers: corsHeaders() });
     }
 
+    // content-length and content-encoding are deliberately NOT forwarded:
+    // this Worker's own fetch() already transparently decodes any
+    // Content-Encoding the upstream sent, so upstream's original values
+    // describe the pre-decode wire body, not the body we're actually
+    // sending here. Forwarding them would understate the real byte count
+    // and falsely claim the (now-decoded) body is still gzip/br-encoded,
+    // which breaks the client's own decode. Let the response stream
+    // without a declared length instead (client already treats a missing
+    // total as indeterminate progress).
     const headers = new Headers(corsHeaders());
-    for (const key of ['content-type', 'content-length', 'content-encoding']) {
-      const value = upstream.headers.get(key);
-      if (value) headers.set(key, value);
-    }
+    const contentType = upstream.headers.get('content-type');
+    if (contentType) headers.set('content-type', contentType);
 
     return new Response(upstream.body, { status: upstream.status, headers });
   },

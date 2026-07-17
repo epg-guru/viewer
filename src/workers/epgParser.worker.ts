@@ -143,7 +143,15 @@ async function runFromUrl(rawUrl: string, corsProxyUrl: string | null): Promise<
     return;
   }
 
-  const totalBytes = Number(response.headers.get('content-length')) || null;
+  // When the response carries a transport Content-Encoding (gzip/br/deflate),
+  // the browser decodes the body transparently before we ever see it, but
+  // Content-Length still reports the pre-decode wire size — so bytesDownloaded
+  // (decompressed) would overshoot totalBytes (compressed) as the stream
+  // progresses. Treat the total as unknown in that case; the UI already has
+  // an indeterminate-progress path for totalBytes === null.
+  const contentEncoding = response.headers.get('content-encoding');
+  const isTransportEncoded = !!contentEncoding && contentEncoding.toLowerCase() !== 'identity';
+  const totalBytes = isTransportEncoded ? null : Number(response.headers.get('content-length')) || null;
   await runFromStream({
     compression,
     totalBytes,
@@ -201,22 +209,36 @@ class WorkerPool {
   private onAllSettled: (() => void) | null = null;
   private failed = false;
 
-  constructor(size: number, private onError: (err: string) => void) {
+  constructor(
+    size: number,
+    private onError: (err: string) => void,
+    private onSettle?: () => void,
+  ) {
     for (let i = 0; i < size; i++) {
       const worker = new Worker(new URL('./xmltvSegmentParser.worker.ts', import.meta.url), { type: 'module' });
       worker.onmessage = (event: MessageEvent<SegmentParseResult>) => {
         this.results.push(event.data);
         this.settled++;
+        this.onSettle?.();
         this.checkDone();
       };
       worker.onerror = (event) => {
         this.failed = true;
         this.settled++;
         this.onError(event.message || 'Parser worker crashed.');
+        this.onSettle?.();
         this.checkDone();
       };
       this.workers.push(worker);
     }
+  }
+
+  get dispatchedCount(): number {
+    return this.dispatched;
+  }
+
+  get settledCount(): number {
+    return this.settled;
   }
 
   dispatch(bytes: Uint8Array, baseOffset: number, sequence: number): void {
@@ -309,11 +331,30 @@ async function runFromStream(job: StreamJob): Promise<void> {
   let header: EpgHeader = {};
   let memoryWarned = false;
 
+  function postProgress(force = false): void {
+    const now = Date.now();
+    if (!force && now - lastProgressPost <= PROGRESS_INTERVAL_MS) return;
+    lastProgressPost = now;
+    post({
+      type: 'progress',
+      bytesDownloaded: bytesRead,
+      totalBytes,
+      channelsSeen: scanner.channelsSeen,
+      programmesSeen: scanner.programmesSeen,
+      segmentsTotal: pool.dispatchedCount,
+      segmentsDone: pool.settledCount,
+    });
+  }
+
   const poolSize = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 4));
   let poolError: string | null = null;
-  const pool = new WorkerPool(poolSize, (msg) => {
-    poolError = msg;
-  });
+  const pool = new WorkerPool(
+    poolSize,
+    (msg) => {
+      poolError = msg;
+    },
+    () => postProgress(),
+  );
   activePool = pool;
 
   // Mirrors the raw decompressed stream (same bytes fed to the scanner and
@@ -395,17 +436,7 @@ async function runFromStream(job: StreamJob): Promise<void> {
     return new TransformStream({
       transform(chunk, controller) {
         bytesRead += chunk.byteLength;
-        const now = Date.now();
-        if (now - lastProgressPost > PROGRESS_INTERVAL_MS) {
-          lastProgressPost = now;
-          post({
-            type: 'progress',
-            bytesDownloaded: bytesRead,
-            totalBytes,
-            channelsSeen: scanner.channelsSeen,
-            programmesSeen: scanner.programmesSeen,
-          });
-        }
+        postProgress();
         controller.enqueue(chunk);
       },
     });
@@ -446,14 +477,7 @@ async function runFromStream(job: StreamJob): Promise<void> {
     }
     scanner.finish();
     flushSegment();
-
-    post({
-      type: 'progress',
-      bytesDownloaded: bytesRead,
-      totalBytes,
-      channelsSeen: scanner.channelsSeen,
-      programmesSeen: scanner.programmesSeen,
-    });
+    postProgress(true);
 
     const segmentResults = await pool.waitForAll();
     if (poolError) throw new Error(poolError);

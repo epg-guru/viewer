@@ -37,6 +37,8 @@ export function StatusArea() {
 
   if (status === 'loading' && progress) {
     const percent = progress.totalBytes ? Math.min(100, (progress.bytesDownloaded / progress.totalBytes) * 100) : null;
+    const parsing = progress.segmentsTotal > 0;
+    const parsePercent = parsing ? Math.min(100, (progress.segmentsDone / progress.segmentsTotal) * 100) : null;
     return (
       <Center style={{ width: '100%', boxSizing: 'border-box' }} px="xs">
         <Stack gap={4} align="center" style={{ maxWidth: '100%' }}>
@@ -69,6 +71,14 @@ export function StatusArea() {
             <Progress value={percent} size="sm" style={{ width: '100%', maxWidth: 260 }} />
           ) : (
             <Loader size="xs" />
+          )}
+          {parsing && (
+            <>
+              <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+                Parsing… {progress.segmentsDone.toLocaleString()} / {progress.segmentsTotal.toLocaleString()} segments
+              </Text>
+              <Progress value={parsePercent ?? 0} size="sm" style={{ width: '100%', maxWidth: 260 }} />
+            </>
           )}
         </Stack>
       </Center>

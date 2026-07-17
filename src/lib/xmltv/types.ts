@@ -124,6 +124,11 @@ export type ParserProgressMessage = {
   totalBytes: number | null;
   channelsSeen: number;
   programmesSeen: number;
+  /** Segment-parser dispatch/completion counts for the CPU-bound field-parsing
+   * phase, which continues (and can outlast) the byte download. Both are 0
+   * until the first segment is dispatched. */
+  segmentsTotal: number;
+  segmentsDone: number;
 };
 
 /** Decompressed size crossed the soft memory-safety threshold. Advisory

@@ -13,6 +13,8 @@ export interface EpgProgress {
   totalBytes: number | null;
   channelsSeen: number;
   programmesSeen: number;
+  segmentsTotal: number;
+  segmentsDone: number;
 }
 
 export interface EpgError {
@@ -61,6 +63,8 @@ function attachWorker(worker: Worker, set: (partial: Partial<EpgState>) => void)
             totalBytes: msg.totalBytes,
             channelsSeen: msg.channelsSeen,
             programmesSeen: msg.programmesSeen,
+            segmentsTotal: msg.segmentsTotal,
+            segmentsDone: msg.segmentsDone,
           },
         });
         break;

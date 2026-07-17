@@ -30,6 +30,9 @@ declare module '@swvn-dispatch/dispatch-ui-kit' {
     loading?: boolean;
     active?: boolean;
     count?: number;
+    /** Mantine Button prop overrides, desktop only. Added in ui-kit 0.1.11. */
+    variant?: string;
+    color?: string;
   }
 
   export interface AppHeaderProps {
@@ -44,6 +47,9 @@ declare module '@swvn-dispatch/dispatch-ui-kit' {
      * parameter, which only applies for `undefined`, not `null`. */
     kofiUrl?: string | null;
     username?: string;
+    /** Render-prop slot rendered after actions, before the logout block.
+     * Added in ui-kit 0.1.10. */
+    extra?: ReactNode | (() => ReactNode);
   }
   export function AppHeader(props: AppHeaderProps): JSX.Element;
 }
