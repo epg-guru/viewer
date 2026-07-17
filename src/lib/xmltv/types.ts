@@ -125,10 +125,15 @@ export type ParserProgressMessage = {
   channelsSeen: number;
   programmesSeen: number;
   /** Segment-parser dispatch/completion counts for the CPU-bound field-parsing
-   * phase, which continues (and can outlast) the byte download. Both are 0
-   * until the first segment is dispatched. */
+   * phase, which now runs concurrently with (and can outlast) the byte
+   * download rather than waiting for it — segments are dispatched as soon as
+   * they're cut. Both are 0 until the first segment is dispatched. */
   segmentsTotal: number;
   segmentsDone: number;
+  /** True once the download stream has been fully read (all bytes seen by
+   * the scanner). Parsing may still have segments in flight after this
+   * flips, since the two phases overlap. */
+  downloadDone: boolean;
 };
 
 export type ParserDoneMessage = {

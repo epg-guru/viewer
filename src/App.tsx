@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { AppShell, Center, Stack, Group, Text, Button } from '@mantine/core';
+import { AppShell, Stack, Group, Button } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { IconCalendarTime } from '@tabler/icons-react';
 import { AppHeader } from '@swvn-dispatch/dispatch-ui-kit';
@@ -117,13 +117,7 @@ export function App() {
                 jumpSignal={jumpSignal}
                 jumpTargetMs={jumpTargetMs}
               />
-            ) : status === 'loading' ? (
-              <Center h="100%">
-                <Text c="dimmed" size="sm">
-                  Loading…
-                </Text>
-              </Center>
-            ) : (
+            ) : status === 'loading' ? null : (
               <EmptyState />
             )}
           </div>

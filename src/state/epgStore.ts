@@ -13,6 +13,7 @@ export interface EpgProgress {
   programmesSeen: number;
   segmentsTotal: number;
   segmentsDone: number;
+  downloadDone: boolean;
 }
 
 export interface EpgError {
@@ -49,6 +50,7 @@ function attachWorker(worker: Worker, set: (partial: Partial<EpgState>) => void)
             programmesSeen: msg.programmesSeen,
             segmentsTotal: msg.segmentsTotal,
             segmentsDone: msg.segmentsDone,
+            downloadDone: msg.downloadDone,
           },
         });
         break;
@@ -95,7 +97,7 @@ export const useEpgStore = create<EpgState>((set, get) => ({
     // Unload whatever's currently loaded before starting the next fetch, so
     // we never hold two sources' worth of index/buffer at once.
     get().cancelLoad();
-    set({ status: 'loading', error: null, index: null, memoryBuffer: null, progress: null });
+    set({ status: 'loading', error: null, index: null, memoryBuffer: null, progress: null, sourceKind: 'url' });
 
     const corsProxyUrl = useSettingsStore.getState().corsProxyUrl;
     const worker = startWorker({ type: 'load', url: parsed.toString(), corsProxyUrl }, set);
@@ -104,7 +106,7 @@ export const useEpgStore = create<EpgState>((set, get) => ({
 
   requestLoadFile: (file: File) => {
     get().cancelLoad();
-    set({ status: 'loading', error: null, index: null, memoryBuffer: null, progress: null });
+    set({ status: 'loading', error: null, index: null, memoryBuffer: null, progress: null, sourceKind: 'file' });
 
     const worker = startWorker({ type: 'load-file', file }, set);
     set({ worker });

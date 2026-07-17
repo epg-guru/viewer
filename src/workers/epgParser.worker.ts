@@ -249,23 +249,6 @@ class WorkerPool {
     worker.postMessage(request, [owned.buffer]);
   }
 
-  /** Like dispatch(), but for a buffer the caller already exclusively owns
-   * (e.g. a segment copied out earlier for deferred dispatch) — skips the
-   * redundant internal copy since there's no shared buffer left to protect. */
-  dispatchOwned(bytes: Uint8Array, baseOffset: number, sequence: number): void {
-    if (this.failed) return;
-    const worker = this.workers[this.next];
-    this.next = (this.next + 1) % this.workers.length;
-    this.dispatched++;
-    // Same TS lib generic-widening quirk as elsewhere in this file (see the
-    // ReadableStream/DecompressionStream comment above): bytes.buffer is
-    // typed ArrayBufferLike, but the runtime contract (an owned, non-shared
-    // ArrayBuffer) is guaranteed by callers of dispatchOwned.
-    const buffer = bytes.buffer as ArrayBuffer;
-    const request: SegmentParseRequest = { type: 'parse-segment', bytes: buffer, baseOffset, sequence };
-    worker.postMessage(request, [buffer]);
-  }
-
   private checkDone(): void {
     if (this.settled >= this.dispatched) this.onAllSettled?.();
   }
@@ -349,6 +332,7 @@ async function runFromStream(job: StreamJob): Promise<void> {
   let bytesRead = 0;
   let lastProgressPost = 0;
   let header: EpgHeader = {};
+  let downloadDone = false;
 
   function postProgress(force = false): void {
     const now = Date.now();
@@ -362,6 +346,7 @@ async function runFromStream(job: StreamJob): Promise<void> {
       programmesSeen: scanner.programmesSeen,
       segmentsTotal: pool.dispatchedCount,
       segmentsDone: pool.settledCount,
+      downloadDone,
     });
   }
 
@@ -412,20 +397,19 @@ async function runFromStream(job: StreamJob): Promise<void> {
     rawBuf = grown;
   }
 
-  // Segments are queued here rather than dispatched to the parser pool
-  // immediately, so parsing only begins once the whole source has downloaded
-  // (see the dispatch loop at the end of the try block below) instead of
-  // running concurrently with the download.
-  const pendingSegments: { bytes: Uint8Array; baseOffset: number; sequence: number }[] = [];
-
+  // Segments are dispatched to the parser pool as soon as they're cut, so
+  // parsing runs concurrently with the rest of the download rather than
+  // waiting for it to finish — both to bound peak memory (no full-file copy
+  // held back for later) and so wall-clock time is roughly
+  // max(download, parse) instead of download + parse.
   function flushSegment(): void {
     if (segmentBytes === 0) return;
     const localStart = segmentBase - rawBufBase;
     const localEnd = segmentEnd - rawBufBase;
     const slice = rawBuf.subarray(localStart, localEnd);
-    // Copy now (not a view): rawBuf keeps mutating via copyWithin/growth
-    // after this point, but this segment won't be dispatched until later.
-    pendingSegments.push({ bytes: slice.slice(), baseOffset: segmentBase, sequence: sequence++ });
+    // dispatch() copies the slice out before transferring it, since rawBuf
+    // keeps mutating via copyWithin/growth after this point.
+    pool.dispatch(slice, segmentBase, sequence++);
     rawBuf.copyWithin(0, localEnd, rawBufLen);
     rawBufLen -= localEnd;
     rawBufBase = segmentEnd;
@@ -502,8 +486,8 @@ async function runFromStream(job: StreamJob): Promise<void> {
     }
     scanner.finish();
     flushSegment();
-    for (const seg of pendingSegments) pool.dispatchOwned(seg.bytes, seg.baseOffset, seg.sequence);
-    postProgress(true); // first post with segmentsTotal > 0 — flips the UI to the parse phase
+    downloadDone = true;
+    postProgress(true);
 
     const segmentResults = await pool.waitForAll();
     if (poolError) throw new Error(poolError);
